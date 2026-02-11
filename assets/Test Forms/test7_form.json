@@ -1,0 +1,12 @@
+{
+  "cola_application_id": "COLA-TST-0007",
+  "label_image_name": "test7.png",
+  "brand_name": "BARBADOS GOLDEN OAK",
+  "class_type_designation": "RUM",
+  "alcohol_content": null,
+  "net_contents": "750 ML",
+  "bottler_producer_name_address": null,
+  "is_imported": true,
+  "country_of_origin_import": "BARBADOS",
+  "government_health_warning_required": true
+}

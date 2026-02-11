@@ -1,0 +1,12 @@
+{
+  "cola_application_id": "COLA-TST-0006",
+  "label_image_name": "test6.png",
+  "brand_name": "BLUE LAGOON",
+  "class_type_designation": "RUM",
+  "alcohol_content": "40% ABV",
+  "net_contents": "750 ML",
+  "bottler_producer_name_address": null,
+  "is_imported": false,
+  "country_of_origin_import": null,
+  "government_health_warning_required": true
+}

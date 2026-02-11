@@ -1,0 +1,12 @@
+{
+  "cola_application_id": "COLA-TST-0005",
+  "label_image_name": "test5.png",
+  "brand_name": "VINO BELLA",
+  "class_type_designation": "ROSE WINE",
+  "alcohol_content": "11.5% ABV",
+  "net_contents": "500 ML",
+  "bottler_producer_name_address": null,
+  "is_imported": false,
+  "country_of_origin_import": null,
+  "government_health_warning_required": true
+}

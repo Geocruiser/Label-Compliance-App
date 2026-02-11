@@ -1,0 +1,12 @@
+{
+  "cola_application_id": "COLA-TST-0008",
+  "label_image_name": "test8.png",
+  "brand_name": "AMALFI COAST",
+  "class_type_designation": "GIN",
+  "alcohol_content": "44% ABV (88 PROOF)",
+  "net_contents": "750 ML",
+  "bottler_producer_name_address": "Distilled & Bottled By Luciana Spirits S.p.A., 8 Via dei Fiori, Amalfi, Italy",
+  "is_imported": true,
+  "country_of_origin_import": "ITALY",
+  "government_health_warning_required": true
+}

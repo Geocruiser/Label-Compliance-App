@@ -1,0 +1,12 @@
+{
+  "cola_application_id": "COLA-TST-0002",
+  "label_image_name": "test2.png",
+  "brand_name": "SUNRISE",
+  "class_type_designation": "IPA",
+  "alcohol_content": null,
+  "net_contents": "12 FL OZ",
+  "bottler_producer_name_address": null,
+  "is_imported": false,
+  "country_of_origin_import": null,
+  "government_health_warning_required": true
+}
