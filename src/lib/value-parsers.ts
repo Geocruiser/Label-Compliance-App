@@ -28,6 +28,13 @@ const normalizeNumericInput = (value: string) => {
   return value.replace(",", ".").replace(/\s+/g, " ");
 };
 
+const normalizeOcrNetContentNoise = (value: string) => {
+  return value
+    .replace(/([0-9])[oO](?=[0-9])/g, "$10")
+    .replace(/\b([0-9]+(?:\.[0-9]+)?)\s*m[iI1!|]\b/g, "$1 mL")
+    .replace(/\b([0-9]+(?:\.[0-9]+)?)\s*m[lL]\b/g, "$1 mL");
+};
+
 const ABV_REGEX =
   /(\d+(?:\.\d+)?)\s*%\s*(?:ABV|ALC\.?\s*\/?\s*VOL\.?|ALC\/VOL)?/i;
 const PROOF_REGEX = /(\d+(?:\.\d+)?)\s*PROOF/i;
@@ -152,7 +159,9 @@ export const parseNetContents = (input: string | null): ParsedNetContents | null
     return null;
   }
 
-  const normalizedInput = normalizeNumericInput(collapseWhitespace(input));
+  const normalizedInput = normalizeOcrNetContentNoise(
+    normalizeNumericInput(collapseWhitespace(input)),
+  );
   const match = normalizedInput.match(NET_CONTENTS_REGEX);
   if (!match) {
     return null;

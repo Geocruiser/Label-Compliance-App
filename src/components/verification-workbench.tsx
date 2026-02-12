@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent } from "react";
 import { LabelPreview } from "@/components/label-preview";
 import { OperatorDiagnostics } from "@/components/operator-diagnostics";
@@ -19,6 +19,21 @@ type OperatorError = {
   stage: "json_parse" | "verification_run";
   message: string;
   timestamp: string;
+};
+
+type FixtureOption = {
+  id: string;
+  formFileName: string;
+  labelFileName: string;
+};
+
+type FixtureLoadPayload = {
+  id: string;
+  formFileName: string;
+  labelFileName: string;
+  labelMimeType: string;
+  labelBase64: string;
+  formJson: unknown;
 };
 
 const toDataUrl = (file: File) => {
@@ -46,6 +61,10 @@ const formatDuration = (durationMs: number) => {
 };
 
 export const VerificationWorkbench = () => {
+  const [fixtureOptions, setFixtureOptions] = useState<FixtureOption[]>([]);
+  const [selectedFixtureId, setSelectedFixtureId] = useState("");
+  const [isFixtureLoading, setIsFixtureLoading] = useState(false);
+  const [fixtureError, setFixtureError] = useState<string | null>(null);
   const [labelFile, setLabelFile] = useState<File | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [application, setApplication] = useState<CanonicalApplication | null>(
@@ -68,6 +87,29 @@ export const VerificationWorkbench = () => {
   const canRunVerification = useMemo(() => {
     return Boolean(labelFile && application && !jsonError);
   }, [application, jsonError, labelFile]);
+
+  useEffect(() => {
+    const loadFixtureList = async () => {
+      try {
+        const response = await fetch("/api/test-fixtures", { cache: "no-store" });
+        const payload = (await response.json()) as {
+          fixtures?: FixtureOption[];
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to load fixture list.");
+        }
+
+        setFixtureOptions(payload.fixtures ?? []);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unable to load fixture list.";
+        setFixtureError(message);
+      }
+    };
+
+    void loadFixtureList();
+  }, []);
 
   const handleClearSession = () => {
     setLabelFile(null);
@@ -96,6 +138,7 @@ export const VerificationWorkbench = () => {
       setVerificationResult(null);
       setRunError(null);
       setSelectedField(null);
+      setFixtureError(null);
     } catch (error) {
       setLabelFile(null);
       setPreviewImageUrl(null);
@@ -119,6 +162,7 @@ export const VerificationWorkbench = () => {
     setJsonFileName(file.name);
     setRunError(null);
     setCleanupNote(null);
+    setFixtureError(null);
 
     try {
       const jsonContent = await file.text();
@@ -155,11 +199,10 @@ export const VerificationWorkbench = () => {
     }
   };
 
-  const handleRunVerification = async () => {
-    if (!labelFile || !application) {
-      return;
-    }
-
+  const runVerification = async (
+    nextLabelFile: File,
+    nextApplication: CanonicalApplication,
+  ) => {
     setIsRunning(true);
     setRunError(null);
     setCleanupNote(null);
@@ -170,12 +213,12 @@ export const VerificationWorkbench = () => {
     const startPerformanceTime = performance.now();
 
     try {
-      const ocrResult = await runLocalOcr(labelFile, (progress) => {
+      const ocrResult = await runLocalOcr(nextLabelFile, (progress) => {
         setOcrProgressPercent(Math.round(progress * 100));
       });
       const ocrLines = ocrResult.lines;
-
-      const fieldResults = verifyLabelLines(application, ocrLines);
+      const ocrTokens = ocrResult.tokens;
+      const fieldResults = verifyLabelLines(nextApplication, ocrLines, ocrTokens);
       const endPerformanceTime = performance.now();
       const endTimeMs = Date.now();
       const durationMs = Math.round(endPerformanceTime - startPerformanceTime);
@@ -183,6 +226,7 @@ export const VerificationWorkbench = () => {
       setVerificationResult({
         fields: fieldResults,
         ocrLines,
+        ocrTokens,
         ocrDiagnostics: ocrResult.diagnostics,
         startedAt: new Date(startTimeMs).toISOString(),
         endedAt: new Date(endTimeMs).toISOString(),
@@ -222,9 +266,87 @@ export const VerificationWorkbench = () => {
     }
   };
 
+  const loadFixtureById = async (fixtureId: string, autoRun: boolean) => {
+    if (!fixtureId) {
+      return;
+    }
+
+    setIsFixtureLoading(true);
+    setFixtureError(null);
+    setRunError(null);
+    setCleanupNote(null);
+    setJsonError(null);
+
+    try {
+      const response = await fetch(`/api/test-fixtures?id=${encodeURIComponent(fixtureId)}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as FixtureLoadPayload & {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load selected fixture.");
+      }
+
+      const labelBytes = Uint8Array.from(atob(payload.labelBase64), (character) =>
+        character.charCodeAt(0),
+      );
+      const labelBlob = new Blob([labelBytes], { type: payload.labelMimeType });
+      const loadedLabelFile = new File([labelBlob], payload.labelFileName, {
+        type: payload.labelMimeType,
+      });
+      const loadedApplication = parseApplicationJson(payload.formJson);
+      const previewUrl = `data:${payload.labelMimeType};base64,${payload.labelBase64}`;
+
+      setLabelFile(loadedLabelFile);
+      setPreviewImageUrl(previewUrl);
+      setApplication(loadedApplication);
+      setJsonFileName(payload.formFileName);
+      setVerificationResult(null);
+      setSelectedField(null);
+
+      if (autoRun) {
+        await runVerification(loadedLabelFile, loadedApplication);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to load selected fixture.";
+      setFixtureError(message);
+      setRunError(message);
+    } finally {
+      setIsFixtureLoading(false);
+    }
+  };
+
+  const handleLoadFixture = async () => {
+    await loadFixtureById(selectedFixtureId, false);
+  };
+
+  const handleFixtureSelection = async (fixtureId: string) => {
+    setSelectedFixtureId(fixtureId);
+    if (!fixtureId) {
+      return;
+    }
+
+    await loadFixtureById(fixtureId, true);
+  };
+
+  const handleRunVerification = async () => {
+    if (!labelFile || !application) {
+      return;
+    }
+    await runVerification(labelFile, application);
+  };
+
   return (
     <div className="grid gap-6">
       <UploadsPanel
+        fixtureOptions={fixtureOptions}
+        selectedFixtureId={selectedFixtureId}
+        isFixtureLoading={isFixtureLoading}
+        fixtureError={fixtureError}
+        handleFixtureSelection={handleFixtureSelection}
+        handleLoadFixture={handleLoadFixture}
         labelFileName={labelFile?.name ?? null}
         jsonFileName={jsonFileName}
         jsonError={jsonError}
@@ -310,6 +432,8 @@ export const VerificationWorkbench = () => {
           imageUrl={previewImageUrl}
           results={verificationResult?.fields ?? []}
           selectedField={selectedField}
+          ocrLines={verificationResult?.ocrLines ?? []}
+          ocrTokens={verificationResult?.ocrTokens ?? []}
         />
       </div>
     </div>

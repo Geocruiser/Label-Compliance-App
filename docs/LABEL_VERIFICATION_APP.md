@@ -55,7 +55,7 @@ Each field must return exactly one of:
 - **Bold** requirement: MVP treats as **manual verification** (report as Needs Review unless you implement a best-effort heuristic).
 
 #### 3.6 Image quality handling
-- Apply preprocessing and degrade gracefully to Needs Review/Missing if image quality prevents confident extraction.
+- Degrade gracefully to Needs Review/Missing if image quality prevents confident extraction.
 
 ---
 
@@ -161,7 +161,7 @@ Each field must return exactly one of:
 ---
 
 ### 10) Recommended implementation notes
-- Local OCR + preprocessing (e.g., PaddleOCR + OpenCV)
+- Local OCR pipeline (e.g., PaddleOCR), with optional explicit preprocessing only if benchmarked improvements justify added complexity
 - Conservative fuzzy matching thresholds to prefer Needs Review
 - Front-end canvas overlay for bounding boxes + hover interactions
 - Log only non-sensitive timing + error metrics

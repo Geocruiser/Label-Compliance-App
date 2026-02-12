@@ -16,7 +16,7 @@ Milestone 1 delivers a working local-first vertical slice:
 - JSON schema parsing and validation:
   - PRD schema (`application_id`, `alcohol_class`, nested `fields`)
   - Legacy test form schema in `assets/Test Forms/*.json`
-- Local OCR pipeline (client-side `tesseract.js`)
+- OCR pipeline integrated with app verification flow
 - Baseline field verification engine with conservative thresholds
 - Results table with required statuses:
   - `Pass`
@@ -30,16 +30,7 @@ Milestone 1 delivers a working local-first vertical slice:
 
 Milestone 2 improves extraction quality and rule precision:
 
-- OCR preprocessing pipeline:
-  - grayscale conversion
-  - denoise (3x3 box blur)
-  - contrast stretch
-  - adaptive thresholding
-  - orientation auto-rotation (90/180/270 when detected)
-- Dual OCR pass strategy:
-  - preprocessed recognition
-  - raw recognition fallback
-  - quality-based selection between both outputs
+- PaddleOCR extraction quality tuning with stable line/token normalization
 - Class-aware verification requirements:
   - distilled spirits alcohol content treated as required
   - wine alcohol content missing values routed to review
@@ -90,11 +81,55 @@ Milestone 4 introduces production-readiness controls and operator telemetry:
   - session-level p95 tracking in the diagnostics panel
 - Operator-facing diagnostics:
   - status distribution + low-confidence field list
-  - OCR stage timings and pipeline selection diagnostics
+  - OCR stage timings and line/token runtime diagnostics
   - structured error stage/timestamp diagnostics
   - cleanup event visibility and transient artifact trace
 - Internal deployment documentation:
   - `docs/DEPLOYMENT.md` with install/build/start/security guidance
+
+## PaddleOCR Full Replacement (Current OCR Backend)
+
+OCR now runs via a Dockerized PaddleOCR service:
+
+- Browser uploads image to Next.js API route (`/api/ocr`)
+- API route forwards image to PaddleOCR service (`services/paddle-ocr`)
+- Paddle response is normalized to `ocrLines` and `ocrTokens`
+- Existing verification and evidence logic consumes normalized output without UI workflow changes
+
+### Local Startup (OCR + App)
+
+1. Install JS dependencies:
+   - `npm install`
+2. Start PaddleOCR container:
+   - `npm run ocr:up`
+3. Start Next.js app:
+   - `npm run dev`
+4. Open:
+   - `http://localhost:3000`
+
+Optional OCR service URL override:
+
+- Set `OCR_SERVICE_URL` (default is `http://localhost:8001/ocr`)
+
+## OCR Evidence Box Precision Improvements
+
+Recent updates improve evidence-box tightness with the PaddleOCR backend:
+
+- Word-level OCR tokens parsed from TSV are now preserved alongside line-level OCR.
+- Field verification prefers minimal token clusters (word evidence) and falls back to line evidence only when needed.
+- Brand-specific compact-box logic reduces broad region captures and avoids address-driven expansion.
+- Evidence diagnostics are now exposed per field:
+  - evidence source (`word` / `line` / `none`)
+  - evidence token count
+  - evidence box area ratio
+  - oversized evidence warnings
+- Operator diagnostics now report OCR token counts and evidence-source distribution.
+
+### Interpreting Box-Quality Diagnostics
+
+- `word` source usually indicates tighter, better localized evidence boxes.
+- High `evidenceBoxAreaRatio` or `evidenceOversized=true` indicates boxes that may include adjacent text.
+- If brand is `Missing` but other fields detect well, check OCR warnings and token counts; low token counts often signal top-label extraction difficulty.
 
 ## Quick Start
 
@@ -107,10 +142,11 @@ Milestone 4 introduces production-readiness controls and operator telemetry:
 
 ## Usage
 
-1. Upload one label image (`.png`, `.jpg`, `.jpeg`, `.webp`).
-2. Upload one application JSON file.
-3. Click `Run Verification`.
-4. Review:
+1. Ensure PaddleOCR service is running (`npm run ocr:up`).
+2. Upload one label image (`.png`, `.jpg`, `.jpeg`, `.webp`).
+3. Upload one application JSON file.
+4. Click `Run Verification`.
+5. Review:
    - Per-field result statuses
    - Application vs extracted values
    - Evidence boxes on the preview image
@@ -119,13 +155,15 @@ Milestone 4 introduces production-readiness controls and operator telemetry:
 
 - `src/components/verification-workbench.tsx` - Milestone 1 orchestrator UI
 - `src/lib/schemas.ts` - JSON schema parsing + canonical model conversion
-- `src/lib/ocr.ts` - local OCR runner
-- `src/lib/image-preprocess.ts` - OCR image preprocessing and rotation utilities
+- `src/lib/ocr.ts` - OCR client adapter that calls `/api/ocr`
+- `src/lib/paddle-normalize.ts` - Paddle response normalization
+- `src/app/api/ocr/route.ts` - Next.js OCR proxy route
 - `src/lib/value-parsers.ts` - ABV/proof and net-contents parsers
 - `src/lib/class-rules.ts` - class-aware requirement and unit policies
 - `src/lib/policy/rulesets.ts` - executable policy rule definitions from docs
 - `src/lib/policy/requirement-matrix.ts` - required/conditional/optional matrix logic
 - `src/lib/verification.ts` - class-aware field matching and strict warning checks
+- `src/lib/evidence-box.ts` - token clustering, outlier filtering, and box quality utilities
 - `src/components/operator-diagnostics.tsx` - operator metrics/error/confidence dashboard
 - `src/lib/performance.ts` - percentile/p95 utilities
 - `docs/required-field-matrix.md` - human-readable matrix tied to executable policy
@@ -133,6 +171,9 @@ Milestone 4 introduces production-readiness controls and operator telemetry:
 - `tests/acceptance/verification-acceptance.test.ts` - deterministic acceptance suite
 - `tests/regression/layout-regression.test.ts` - edge-case regression fixtures
 - `scripts/benchmark-p95.ts` - deterministic p95 benchmark runner
+- `services/paddle-ocr/app.py` - PaddleOCR FastAPI service
+- `services/paddle-ocr/Dockerfile` - container image definition
+- `docker-compose.ocr.yml` - local OCR service orchestration
 - `ARCHITECTURE.md` - architecture, folder structure, and milestone plan
 - `tasks/CHECKLIST.md` - implementation checklist and milestone tracker
 
@@ -142,5 +183,7 @@ Milestone 4 introduces production-readiness controls and operator telemetry:
 - Type check: `npm run typecheck`
 - Tests: `npm run test`
 - Acceptance tests only: `npm run test:acceptance`
+- OCR service up: `npm run ocr:up`
+- OCR service down: `npm run ocr:down`
 - Benchmark p95: `npm run benchmark:p95`
 - Combined: `npm run check`

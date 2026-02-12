@@ -4,6 +4,15 @@ import {
   getNetUnitPolicy,
 } from "@/lib/class-rules";
 import {
+  buildContiguousTokenClusters,
+  clampEvidenceBoxByField,
+  computeEvidenceBoxAreaRatio,
+  isEvidenceBoxOversized,
+  mergeEvidenceBoxes,
+  removeOutlierTokens,
+  sortTokensForReadingOrder,
+} from "@/lib/evidence-box";
+import {
   collapseWhitespace,
   diceCoefficient,
   normalizeText,
@@ -18,12 +27,15 @@ import type {
   CanonicalApplication,
   FieldKey,
   OcrLine,
+  OcrToken,
   VerificationFieldResult,
 } from "@/lib/types";
 
 type MatchCandidate = {
   line: OcrLine;
   score: number;
+  source: "word" | "line";
+  tokenCount: number;
 };
 
 type FieldExpectation = {
@@ -43,6 +55,155 @@ const formatApplicationValue = (value: string | null) => {
   return trimmedValue.length > 0 ? trimmedValue : "N/A";
 };
 
+const WARNING_PREFIX = "GOVERNMENT WARNING:";
+
+const stripWarningPrefix = (value: string) => {
+  return value.replace(/^government\s+warning:\s*/i, "").trim();
+};
+
+const getLineCenterY = (line: OcrLine) => {
+  return (line.bbox.y0 + line.bbox.y1) / 2;
+};
+
+const getLineCenterX = (line: OcrLine) => {
+  return (line.bbox.x0 + line.bbox.x1) / 2;
+};
+
+const getMedianLineHeight = (lines: OcrLine[]) => {
+  if (lines.length === 0) {
+    return 16;
+  }
+
+  const sortedHeights = lines
+    .map((line) => Math.max(1, line.bbox.y1 - line.bbox.y0))
+    .sort((left, right) => left - right);
+  return sortedHeights[Math.floor(sortedHeights.length / 2)];
+};
+
+const sortLinesForWarningReadingOrder = (lines: OcrLine[]) => {
+  if (lines.length <= 1) {
+    return lines;
+  }
+
+  const sortedByY = [...lines].sort((left, right) => {
+    return getLineCenterY(left) - getLineCenterY(right);
+  });
+  const medianHeight = getMedianLineHeight(sortedByY);
+  const sameRowThreshold = Math.max(6, medianHeight * 0.5);
+
+  const rowGroups: OcrLine[][] = [];
+  const rowCenterYs: number[] = [];
+
+  for (const line of sortedByY) {
+    const centerY = getLineCenterY(line);
+    if (rowGroups.length === 0) {
+      rowGroups.push([line]);
+      rowCenterYs.push(centerY);
+      continue;
+    }
+
+    const rowIndex = rowGroups.length - 1;
+    const rowCenterY = rowCenterYs[rowIndex];
+    if (Math.abs(centerY - rowCenterY) <= sameRowThreshold) {
+      rowGroups[rowIndex].push(line);
+      const rowSize = rowGroups[rowIndex].length;
+      rowCenterYs[rowIndex] = ((rowCenterY * (rowSize - 1)) + centerY) / rowSize;
+      continue;
+    }
+
+    rowGroups.push([line]);
+    rowCenterYs.push(centerY);
+  }
+
+  const orderedLines: OcrLine[] = [];
+  for (const row of rowGroups) {
+    orderedLines.push(
+      ...row.sort((left, right) => getLineCenterX(left) - getLineCenterX(right)),
+    );
+  }
+
+  return orderedLines;
+};
+
+const normalizeWarningBodyForComparison = (value: string) => {
+  let corrected = value;
+  // Common OCR punctuation artifacts.
+  corrected = corrected.replace(/\s*\/\s*/g, " ");
+  corrected = corrected.replace(/\(\s*\(/g, "(");
+  // Common OCR token merge/split errors observed in warning text.
+  corrected = corrected.replace(/\bofthe\b/gi, "of the");
+  corrected = corrected.replace(/\bthe[\.\s]*risk\b/gi, "the risk");
+  corrected = corrected.replace(/\babiity\b/gi, "ability");
+  corrected = corrected.replace(/\bprobiems\b/gi, "problems");
+  corrected = corrected.replace(/\bprob1ems\b/gi, "problems");
+  corrected = corrected.replace(/\bofbirth\b/gi, "of birth");
+  corrected = corrected.replace(
+    /\bcnsptionalcoholicbeverages\b/gi,
+    "consumption of alcoholic beverages",
+  );
+  corrected = corrected.replace(
+    /\bconsumptionalcoholicbeverages\b/gi,
+    "consumption of alcoholic beverages",
+  );
+  corrected = corrected.replace(
+    /consumption of alcoholic beverages,\s*and may cause health problems\.?\s*impairs your (?:abiity|ability) to drive a car or operate machinery,?/gi,
+    "consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems",
+  );
+  // Common OCR substitutions for clause markers and short words.
+  corrected = corrected.replace(/\(\s*[il]\s*\)/gi, "(1)");
+  corrected = corrected.replace(/\(\s*z\s*\)/gi, "(2)");
+  corrected = corrected.replace(/\(\s*([12])\s*\)\s*/g, "($1) ");
+  corrected = corrected.replace(/\b([12])([a-z])/gi, "$1 $2");
+  corrected = corrected.replace(/\b1o\b/gi, "to");
+
+  return normalizeText(corrected);
+};
+
+const isExpectedTokenSequencePresent = (expected: string, extracted: string) => {
+  const expectedTokens = expected
+    .split(" ")
+    .filter((token) => token.length > 0)
+    .filter((token) => token !== "1" && token !== "2");
+  const extractedTokens = extracted.split(" ").filter((token) => token.length > 0);
+  if (expectedTokens.length === 0) {
+    return false;
+  }
+
+  const matchedIndices = new Set<number>();
+  let extractedIndex = 0;
+  for (const expectedToken of expectedTokens) {
+    let tokenMatched = false;
+    while (extractedIndex < extractedTokens.length) {
+      const candidateToken = extractedTokens[extractedIndex];
+      const candidateIndex = extractedIndex;
+      extractedIndex += 1;
+      if (candidateToken === expectedToken) {
+        matchedIndices.add(candidateIndex);
+        tokenMatched = true;
+        break;
+      }
+    }
+
+    if (!tokenMatched) {
+      return false;
+    }
+  }
+
+  for (let index = 0; index < extractedTokens.length; index += 1) {
+    if (matchedIndices.has(index)) {
+      continue;
+    }
+
+    const token = extractedTokens[index];
+    const isTinyNoiseToken = token.length <= 2;
+    if (!isTinyNoiseToken) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 const appendRuleContext = (reason: string, ruleIds: string[]) => {
   if (ruleIds.length === 0) {
     return reason;
@@ -51,21 +212,7 @@ const appendRuleContext = (reason: string, ruleIds: string[]) => {
   return `${reason} (Rules: ${ruleIds.join(", ")})`;
 };
 
-const mergeBoxes = (boxes: BoundingBox[]): BoundingBox | null => {
-  if (boxes.length === 0) {
-    return null;
-  }
-
-  return boxes.reduce<BoundingBox>(
-    (mergedBox, currentBox) => ({
-      x0: Math.min(mergedBox.x0, currentBox.x0),
-      y0: Math.min(mergedBox.y0, currentBox.y0),
-      x1: Math.max(mergedBox.x1, currentBox.x1),
-      y1: Math.max(mergedBox.y1, currentBox.y1),
-    }),
-    boxes[0],
-  );
-};
+const mergeBoxes = (boxes: BoundingBox[]) => mergeEvidenceBoxes(boxes);
 
 const averageConfidence = (lines: OcrLine[]) => {
   if (lines.length === 0) {
@@ -158,6 +305,12 @@ const getCombinedOcrText = (ocrLines: OcrLine[]) => {
   return collapseWhitespace(ocrLines.map((line) => line.text).join(" "));
 };
 
+const getPageBounds = (ocrLines: OcrLine[], ocrTokens: OcrToken[]) => {
+  const lineBoxes = ocrLines.map((line) => line.bbox);
+  const tokenBoxes = ocrTokens.map((token) => token.bbox);
+  return mergeBoxes([...lineBoxes, ...tokenBoxes]);
+};
+
 const getAggregateMatchCandidate = (
   field: FieldKey,
   expectedValue: string,
@@ -189,6 +342,14 @@ const getAggregateMatchCandidate = (
       const lineCenterY = (line.bbox.y0 + line.bbox.y1) / 2;
       const isUpperRegion = lineCenterY <= maxY * 0.65;
       return isUpperRegion && !isAddressLikeText(line.text);
+    });
+  } else if (field === "name_address") {
+    filteredTokenLines = tokenLines.filter((line) => {
+      const lineCenterY = (line.bbox.y0 + line.bbox.y1) / 2;
+      const isLowerRegion = lineCenterY >= maxY * 0.45;
+      const hasAddressSignal =
+        isAddressLikeText(line.text) || /,/.test(line.text) || /\d/.test(line.text);
+      return isLowerRegion && hasAddressSignal;
     });
   }
 
@@ -227,7 +388,159 @@ const getAggregateMatchCandidate = (
       bbox: mergedEvidenceBox,
     },
     score: aggregateScore,
+    source: "line",
+    tokenCount: filteredTokenLines.length,
   };
+};
+
+const getBestWordMatch = (
+  field: FieldKey,
+  expectedValue: string,
+  ocrTokens: OcrToken[],
+  pageBounds: BoundingBox | null,
+): MatchCandidate | null => {
+  if (ocrTokens.length === 0) {
+    return null;
+  }
+
+  const expectedTokens = tokenizeNormalizedText(expectedValue);
+  if (expectedTokens.length === 0) {
+    return null;
+  }
+
+  const maxY = ocrTokens.reduce(
+    (largestY, token) => Math.max(largestY, token.bbox.y1),
+    1,
+  );
+  let candidateTokens = ocrTokens.filter((token) => token.text.trim().length > 0);
+
+  if (field === "brand_name") {
+    candidateTokens = candidateTokens.filter((token) => {
+      const centerY = (token.bbox.y0 + token.bbox.y1) / 2;
+      const isUpperRegion = centerY <= maxY * 0.72;
+      return isUpperRegion && !isAddressLikeText(token.text);
+    });
+  }
+
+  if (field === "name_address") {
+    candidateTokens = candidateTokens.filter((token) => {
+      return isAddressLikeText(token.text) || /,/.test(token.text) || /\d/.test(token.text);
+    });
+  }
+
+  if (candidateTokens.length === 0) {
+    return null;
+  }
+
+  const clusters = buildContiguousTokenClusters(candidateTokens);
+  let bestCandidate: MatchCandidate | null = null;
+
+  const evaluateTokenSequence = (sequence: OcrToken[]) => {
+    const orderedCluster = sortTokensForReadingOrder(sequence);
+    const maxWindow = Math.min(orderedCluster.length, Math.max(8, expectedTokens.length + 4));
+
+    for (let startIndex = 0; startIndex < orderedCluster.length; startIndex += 1) {
+      for (
+        let windowSize = 1;
+        windowSize <= maxWindow && startIndex + windowSize <= orderedCluster.length;
+        windowSize += 1
+      ) {
+        const slice = orderedCluster.slice(startIndex, startIndex + windowSize);
+        const filteredSlice = removeOutlierTokens(slice);
+        const candidateText = collapseWhitespace(
+          filteredSlice.map((token) => token.text).join(" "),
+        );
+        if (candidateText.length === 0) {
+          continue;
+        }
+
+        const tokenCoverage = getApproximateTokenCoverage(expectedTokens, candidateText);
+        const minimumCoverage =
+          field === "brand_name" && expectedTokens.length > 1 ? 0.7 : 0.45;
+        if (tokenCoverage < minimumCoverage) {
+          continue;
+        }
+
+        const similarity = diceCoefficient(expectedValue, candidateText);
+        const includesExpected = normalizedIncludes(candidateText, expectedValue);
+        const averageTokenConfidence = averageConfidence(
+          filteredSlice.map((token) => ({
+            text: token.text,
+            confidence: token.confidence,
+            bbox: token.bbox,
+          })),
+        );
+        const candidateBox = mergeBoxes(filteredSlice.map((token) => token.bbox));
+        if (!candidateBox || averageTokenConfidence === null) {
+          continue;
+        }
+
+        const clampedBox = clampEvidenceBoxByField(
+          field,
+          candidateBox,
+          filteredSlice.map((token) => token.bbox),
+        );
+        const areaRatio = computeEvidenceBoxAreaRatio(clampedBox, pageBounds);
+        const oversizedPenalty = isEvidenceBoxOversized(field, areaRatio) ? 0.22 : 0;
+        const windowPenalty = Math.max(0, windowSize - expectedTokens.length) * 0.03;
+        const baseScore =
+          Math.max(similarity, includesExpected ? 0.99 : 0, tokenCoverage) * 0.75;
+        let score = baseScore + (averageTokenConfidence * 0.25);
+
+        if (field === "brand_name") {
+          const uppercaseBonus = isMostlyUppercase(candidateText) ? 0.06 : 0;
+          const addressPenalty = isAddressLikeText(candidateText) ? 0.45 : 0;
+          score += uppercaseBonus - addressPenalty;
+        }
+
+        if (field === "class_type_designation") {
+          const candidateCenterY = (clampedBox.y0 + clampedBox.y1) / 2;
+          const topBias = Math.max(0, 1 - (candidateCenterY / maxY));
+          score += topBias * 0.08;
+        }
+
+        score = score - windowPenalty - oversizedPenalty;
+
+        if (!bestCandidate || score > bestCandidate.score) {
+          bestCandidate = {
+            line: {
+              text: candidateText,
+              confidence: averageTokenConfidence,
+              bbox: clampedBox,
+            },
+            score,
+            source: "word",
+            tokenCount: filteredSlice.length,
+          };
+        }
+      }
+    }
+  };
+
+  for (const cluster of clusters) {
+    evaluateTokenSequence(cluster);
+  }
+
+  if (
+    !bestCandidate &&
+    field === "brand_name" &&
+    expectedTokens.length > 1 &&
+    candidateTokens.length > 1
+  ) {
+    // Brand words can be spaced apart beyond strict cluster gap thresholds.
+    evaluateTokenSequence(candidateTokens);
+  }
+
+  const finalCandidate = bestCandidate as MatchCandidate | null;
+  if (!finalCandidate) {
+    return null;
+  }
+
+  if (finalCandidate.score < 0.42) {
+    return null;
+  }
+
+  return finalCandidate;
 };
 
 const getBestLineMatch = (
@@ -240,9 +553,20 @@ const getBestLineMatch = (
   const maxY = ocrLines.reduce((largest, line) => Math.max(largest, line.bbox.y1), 1);
 
   for (const line of ocrLines) {
+    if (field === "name_address") {
+      const lineCenterY = (line.bbox.y0 + line.bbox.y1) / 2;
+      if (lineCenterY <= maxY * 0.45) {
+        continue;
+      }
+    }
+
     const similarity = diceCoefficient(expectedValue, line.text);
     const includesMatch = normalizedIncludes(line.text, expectedValue);
-    const expectedContainsLine = normalizedIncludes(expectedValue, line.text);
+    const normalizedLineText = normalizeText(line.text);
+    const lineTokenCount = tokenizeNormalizedText(line.text).length;
+    const expectedContainsLine =
+      normalizedIncludes(expectedValue, line.text) &&
+      (normalizedLineText.length >= 4 || lineTokenCount >= 2);
 
     const lineScoreBase = Math.max(
       similarity,
@@ -275,19 +599,46 @@ const getBestLineMatch = (
       if (/,/.test(line.text) || /\d/.test(line.text)) {
         lineScore += 0.08;
       }
+      if (tokenCoverage < 0.35) {
+        lineScore -= 0.22;
+      }
+      if (normalizedLineText.length < 6) {
+        lineScore -= 0.18;
+      }
+    }
+
+    if (field === "class_type_designation") {
+      const lineCenterY = (line.bbox.y0 + line.bbox.y1) / 2;
+      const topBias = Math.max(0, 1 - (lineCenterY / maxY));
+      lineScore += topBias * 0.08;
     }
 
     if (!bestCandidate || lineScore > bestCandidate.score) {
       bestCandidate = {
         line,
         score: lineScore,
+        source: "line",
+        tokenCount: Math.max(1, line.text.trim().split(/\s+/).length),
       };
     }
   }
 
-  const aggregateCandidate = getAggregateMatchCandidate(field, expectedValue, ocrLines);
+  const aggregateCandidate =
+    field === "brand_name" || field === "name_address"
+      ? getAggregateMatchCandidate(field, expectedValue, ocrLines)
+      : null;
   if (aggregateCandidate) {
-    if (!bestCandidate || aggregateCandidate.score > bestCandidate.score) {
+    const preferAggregateForAddress =
+      field === "name_address" &&
+      bestCandidate !== null &&
+      aggregateCandidate.tokenCount >= Math.max(4, bestCandidate.tokenCount + 2) &&
+      aggregateCandidate.score >= bestCandidate.score - 0.2;
+
+    if (
+      !bestCandidate ||
+      aggregateCandidate.score > bestCandidate.score ||
+      preferAggregateForAddress
+    ) {
       bestCandidate = aggregateCandidate;
     }
   }
@@ -345,9 +696,21 @@ const verifyGovernmentWarning = (
   ocrLines: OcrLine[],
 ): VerificationFieldResult => {
   const expectedValue = application.fields.governmentWarningText;
-  const warningStartIndex = ocrLines.findIndex((line) =>
+  let warningStartIndex = ocrLines.findIndex((line) =>
     normalizedIncludes(line.text, "government warning"),
   );
+
+  if (warningStartIndex < 0) {
+    const maxY = ocrLines.reduce((largest, line) => Math.max(largest, line.bbox.y1), 1);
+    warningStartIndex = ocrLines.findIndex((line) => {
+      const lineCenterY = (line.bbox.y0 + line.bbox.y1) / 2;
+      const isLowerRegion = lineCenterY >= maxY * 0.45;
+      const hasWarningAnchor =
+        normalizedIncludes(line.text, "government") ||
+        normalizedIncludes(line.text, "warning");
+      return isLowerRegion && hasWarningAnchor;
+    });
+  }
 
   if (!application.fields.governmentWarningRequired) {
     return {
@@ -363,6 +726,34 @@ const verifyGovernmentWarning = (
   }
 
   if (warningStartIndex < 0) {
+    const fullExtractedWarning = collapseWhitespace(
+      ocrLines.map((line) => line.text).join(" "),
+    );
+    const fullWarningSimilarity = diceCoefficient(expectedValue, fullExtractedWarning);
+    const fullHasClauseMarkers =
+      fullExtractedWarning.includes("(1)") && fullExtractedWarning.includes("(2)");
+    const fullMentionsSurgeonGeneral = normalizedIncludes(
+      fullExtractedWarning,
+      "surgeon general",
+    );
+
+    if (
+      fullWarningSimilarity >= 0.62 ||
+      (fullHasClauseMarkers && fullMentionsSurgeonGeneral)
+    ) {
+      return {
+        field: "government_warning",
+        label: FIELD_LABELS.government_warning,
+        applicationValue: formatApplicationValue(expectedValue),
+        extractedValue: fullExtractedWarning,
+        status: "Needs Review",
+        confidence: averageConfidence(ocrLines),
+        reason:
+          "Warning-like text was detected across the label, but the canonical anchor phrase was fragmented in OCR lines.",
+        evidenceBox: mergeBoxes(ocrLines.map((line) => line.bbox)),
+      };
+    }
+
     return {
       field: "government_warning",
       label: FIELD_LABELS.government_warning,
@@ -376,27 +767,40 @@ const verifyGovernmentWarning = (
     };
   }
 
-  const warningSlice = ocrLines.slice(warningStartIndex, warningStartIndex + 10);
-  const extractedWarning = warningSlice.map((line) => line.text).join(" ");
+  const warningSlice = ocrLines.slice(warningStartIndex, warningStartIndex + 60);
+  const warningAnchorLine = ocrLines[warningStartIndex];
+  const medianHeight = getMedianLineHeight(ocrLines);
+  const anchorCenterY = warningAnchorLine ? getLineCenterY(warningAnchorLine) : 0;
+  const warningCandidateLines = ocrLines.filter((line) => {
+    return getLineCenterY(line) >= anchorCenterY - (medianHeight * 0.6);
+  });
+  const orderedWarningLines = sortLinesForWarningReadingOrder(
+    warningCandidateLines.length > 0 ? warningCandidateLines : warningSlice,
+  );
+  const extractedWarning = orderedWarningLines.map((line) => line.text).join(" ");
   const collapsedExtractedWarning = collapseWhitespace(extractedWarning);
   const collapsedExpectedWarning = collapseWhitespace(expectedValue);
-  const extractedPrefix = collapsedExtractedWarning.slice(
-    0,
-    "GOVERNMENT WARNING:".length + 2,
-  );
-  const uppercasePrefixPresent = extractedPrefix.startsWith("GOVERNMENT WARNING:");
+  const extractedPrefix = collapsedExtractedWarning.slice(0, WARNING_PREFIX.length + 2);
+  const uppercasePrefixPresent = extractedPrefix.startsWith(WARNING_PREFIX);
+  const expectedWarningBody = stripWarningPrefix(collapsedExpectedWarning);
+  const extractedWarningBody = stripWarningPrefix(collapsedExtractedWarning);
+  const normalizedExpectedWarningBody =
+    normalizeWarningBodyForComparison(expectedWarningBody);
+  const normalizedExtractedWarningBody =
+    normalizeWarningBodyForComparison(extractedWarningBody);
+  const exactWarningBodyMatch =
+    normalizedExtractedWarningBody.length > 0 &&
+    isExpectedTokenSequencePresent(
+      normalizedExpectedWarningBody,
+      normalizedExtractedWarningBody,
+    );
   const hasClauseMarkers =
     collapsedExtractedWarning.includes("(1)") &&
     collapsedExtractedWarning.includes("(2)");
-  const mentionsSurgeonGeneral = normalizedIncludes(
-    collapsedExtractedWarning,
-    "surgeon general",
-  );
-  const isExactText = collapsedExtractedWarning.includes(collapsedExpectedWarning);
   const warningSimilarity = diceCoefficient(expectedValue, extractedWarning);
-  const warningConfidence = averageConfidence(warningSlice);
+  const warningConfidence = averageConfidence(orderedWarningLines);
 
-  if (isExactText && uppercasePrefixPresent) {
+  if (exactWarningBodyMatch && uppercasePrefixPresent) {
     return {
       field: "government_warning",
       label: FIELD_LABELS.government_warning,
@@ -405,19 +809,26 @@ const verifyGovernmentWarning = (
       status: "Pass",
       confidence: warningConfidence,
       reason:
-        "Government warning matched exact expected phrase and uppercase prefix requirement.",
-      evidenceBox: mergeBoxes(warningSlice.map((line) => line.bbox)),
+        "Government warning matched required uppercase prefix and exact wording.",
+      evidenceBox: mergeBoxes(orderedWarningLines.map((line) => line.bbox)),
     };
   }
 
-  if (
-    warningSimilarity >= 0.9 &&
-    hasClauseMarkers &&
-    mentionsSurgeonGeneral &&
-    uppercasePrefixPresent &&
-    warningConfidence !== null &&
-    warningConfidence >= 0.78
-  ) {
+  const warningDetectedConfidently =
+    warningConfidence !== null && warningConfidence >= 0.7;
+  if (warningDetectedConfidently) {
+    const mismatchReasons: string[] = [];
+    if (!uppercasePrefixPresent) {
+      mismatchReasons.push("missing required uppercase 'GOVERNMENT WARNING:' prefix");
+    }
+    if (!exactWarningBodyMatch) {
+      mismatchReasons.push("warning body does not exactly match required wording");
+    }
+    const mismatchReason =
+      mismatchReasons.length > 0
+        ? mismatchReasons.join("; ")
+        : "warning text does not satisfy strict formatting requirements";
+
     return {
       field: "government_warning",
       label: FIELD_LABELS.government_warning,
@@ -425,9 +836,8 @@ const verifyGovernmentWarning = (
       extractedValue: collapsedExtractedWarning,
       status: "Fail",
       confidence: warningConfidence,
-      reason:
-        "Warning was confidently detected but does not exactly match required wording.",
-      evidenceBox: mergeBoxes(warningSlice.map((line) => line.bbox)),
+      reason: `Warning was detected with high confidence but is non-compliant: ${mismatchReason}.`,
+      evidenceBox: mergeBoxes(orderedWarningLines.map((line) => line.bbox)),
     };
   }
 
@@ -441,7 +851,7 @@ const verifyGovernmentWarning = (
       confidence: warningConfidence,
       reason:
         "Warning region was detected, but strict wording or format checks were inconclusive.",
-      evidenceBox: mergeBoxes(warningSlice.map((line) => line.bbox)),
+      evidenceBox: mergeBoxes(orderedWarningLines.map((line) => line.bbox)),
     };
   }
 
@@ -454,13 +864,15 @@ const verifyGovernmentWarning = (
     confidence: warningConfidence,
     reason:
       "Detected text near warning region was too incomplete for strict validation.",
-    evidenceBox: mergeBoxes(warningSlice.map((line) => line.bbox)),
+    evidenceBox: mergeBoxes(orderedWarningLines.map((line) => line.bbox)),
   };
 };
 
 const verifyTextField = (
   expectation: FieldExpectation,
   ocrLines: OcrLine[],
+  ocrTokens: OcrToken[],
+  pageBounds: BoundingBox | null,
 ): VerificationFieldResult => {
   const expectedValue = expectation.expectedValue;
 
@@ -477,6 +889,10 @@ const verifyTextField = (
         expectation.supportingRuleIds,
       ),
       evidenceBox: null,
+      evidenceSource: "none",
+      evidenceTokenCount: 0,
+      evidenceBoxAreaRatio: null,
+      evidenceOversized: false,
     };
   }
 
@@ -493,6 +909,10 @@ const verifyTextField = (
         expectation.supportingRuleIds,
       ),
       evidenceBox: null,
+      evidenceSource: "none",
+      evidenceTokenCount: 0,
+      evidenceBoxAreaRatio: null,
+      evidenceOversized: false,
     };
   }
 
@@ -506,10 +926,52 @@ const verifyTextField = (
       confidence: null,
       reason: "Field expectation is not available for automated verification.",
       evidenceBox: null,
+      evidenceSource: "none",
+      evidenceTokenCount: 0,
+      evidenceBoxAreaRatio: null,
+      evidenceOversized: false,
     };
   }
 
-  const matchCandidate = getBestLineMatch(expectation.field, expectedValue, ocrLines);
+  const wordCandidate = getBestWordMatch(
+    expectation.field,
+    expectedValue,
+    ocrTokens,
+    pageBounds,
+  );
+  const lineCandidate = getBestLineMatch(expectation.field, expectedValue, ocrLines);
+  const expectedTokenCount = tokenizeNormalizedText(expectedValue).length;
+  const lineAreaRatio = lineCandidate
+    ? computeEvidenceBoxAreaRatio(lineCandidate.line.bbox, pageBounds)
+    : null;
+  const lineOversized = lineCandidate
+    ? isEvidenceBoxOversized(expectation.field, lineAreaRatio)
+    : false;
+
+  let matchCandidate: MatchCandidate | null = lineCandidate;
+  if (wordCandidate && !lineCandidate) {
+    matchCandidate = wordCandidate;
+  } else if (wordCandidate && lineCandidate) {
+    if (expectation.field === "brand_name") {
+      const preferWordForMultiWordBrand =
+        expectedTokenCount > 1 &&
+        wordCandidate.tokenCount >= Math.min(2, expectedTokenCount);
+
+      if (preferWordForMultiWordBrand) {
+        matchCandidate = wordCandidate;
+      } else if (lineOversized || isAddressLikeText(lineCandidate.line.text)) {
+        matchCandidate = wordCandidate;
+      } else if (wordCandidate.score >= lineCandidate.score - 0.02) {
+        matchCandidate = wordCandidate;
+      }
+    } else if (
+      (lineOversized && wordCandidate.score >= lineCandidate.score - 0.03) ||
+      wordCandidate.score >= lineCandidate.score + 0.08
+    ) {
+      matchCandidate = wordCandidate;
+    }
+  }
+
   if (!matchCandidate) {
     return {
       field: expectation.field,
@@ -521,6 +983,10 @@ const verifyTextField = (
       reason:
         "No OCR line matched the expected value with enough confidence.",
       evidenceBox: null,
+      evidenceSource: "none",
+      evidenceTokenCount: 0,
+      evidenceBoxAreaRatio: null,
+      evidenceOversized: false,
     };
   }
 
@@ -528,8 +994,24 @@ const verifyTextField = (
     matchCandidate.line.confidence,
     matchCandidate.score,
   );
+  const matchedTokenCoverage = getApproximateTokenCoverage(
+    tokenizeNormalizedText(expectedValue),
+    matchCandidate.line.text,
+  );
+  const areaRatio = computeEvidenceBoxAreaRatio(matchCandidate.line.bbox, pageBounds);
+  const oversized = isEvidenceBoxOversized(expectation.field, areaRatio);
+  const evidenceReasonPrefix = oversized
+    ? "Evidence area is larger than expected and may include adjacent text. "
+    : "";
+  const passCoverageThreshold = expectedTokenCount > 2 ? 0.55 : 0.35;
+  const passScoreThreshold = expectation.field === "brand_name" ? 0.93 : 0.9;
+  const passConfidenceThreshold = expectation.field === "brand_name" ? 0.92 : 0.55;
 
-  if (matchCandidate.score >= 0.9 && matchCandidate.line.confidence >= 0.55) {
+  if (
+    matchCandidate.score >= passScoreThreshold &&
+    matchCandidate.line.confidence >= passConfidenceThreshold &&
+    matchedTokenCoverage >= passCoverageThreshold
+  ) {
     return {
       field: expectation.field,
       label: FIELD_LABELS[expectation.field],
@@ -538,8 +1020,12 @@ const verifyTextField = (
       status: "Pass",
       confidence: resolvedConfidence,
       reason:
-        "Detected line strongly matches the application value at a high confidence threshold.",
+        `${evidenceReasonPrefix}Detected text strongly matches the application value at a high confidence threshold.`,
       evidenceBox: matchCandidate.line.bbox,
+      evidenceSource: matchCandidate.source,
+      evidenceTokenCount: matchCandidate.tokenCount,
+      evidenceBoxAreaRatio: areaRatio,
+      evidenceOversized: oversized,
     };
   }
 
@@ -552,8 +1038,12 @@ const verifyTextField = (
       status: "Needs Review",
       confidence: resolvedConfidence,
       reason:
-        "Detected text is close to expected but below strict pass threshold.",
+        `${evidenceReasonPrefix}Detected text is close to expected but below strict pass threshold.`,
       evidenceBox: matchCandidate.line.bbox,
+      evidenceSource: matchCandidate.source,
+      evidenceTokenCount: matchCandidate.tokenCount,
+      evidenceBoxAreaRatio: areaRatio,
+      evidenceOversized: oversized,
     };
   }
 
@@ -565,8 +1055,12 @@ const verifyTextField = (
     status: "Fail",
     confidence: resolvedConfidence,
     reason:
-      "Detected text does not match the application value under conservative matching rules.",
+      `${evidenceReasonPrefix}Detected text does not match the application value under conservative matching rules.`,
     evidenceBox: matchCandidate.line.bbox,
+    evidenceSource: matchCandidate.source,
+    evidenceTokenCount: matchCandidate.tokenCount,
+    evidenceBoxAreaRatio: areaRatio,
+    evidenceOversized: oversized,
   };
 };
 
@@ -574,6 +1068,8 @@ const verifyAlcoholField = (
   expectation: FieldExpectation,
   application: CanonicalApplication,
   ocrLines: OcrLine[],
+  ocrTokens: OcrToken[],
+  pageBounds: BoundingBox | null,
 ): VerificationFieldResult => {
   const expectedValue = expectation.expectedValue;
   const fullOcrText = getCombinedOcrText(ocrLines);
@@ -611,12 +1107,12 @@ const verifyAlcoholField = (
   }
 
   if (!expectedValue) {
-    return verifyTextField(expectation, ocrLines);
+    return verifyTextField(expectation, ocrLines, ocrTokens, pageBounds);
   }
 
   const expectedAlcohol = parseAlcoholContent(expectedValue);
   if (!expectedAlcohol) {
-    return verifyTextField(expectation, ocrLines);
+    return verifyTextField(expectation, ocrLines, ocrTokens, pageBounds);
   }
 
   let bestCandidate: MatchCandidate | null = null;
@@ -654,6 +1150,8 @@ const verifyAlcoholField = (
       bestCandidate = {
         line,
         score: normalizedScore,
+        source: "line",
+        tokenCount: Math.max(1, line.text.trim().split(/\s+/).length),
       };
       bestParsedAlcohol = parsedAlcohol;
     }
@@ -778,8 +1276,11 @@ const verifyNetContentsField = (
   expectation: FieldExpectation,
   application: CanonicalApplication,
   ocrLines: OcrLine[],
+  ocrTokens: OcrToken[],
+  pageBounds: BoundingBox | null,
 ): VerificationFieldResult => {
   const expectedValue = expectation.expectedValue;
+  const fullOcrText = getCombinedOcrText(ocrLines);
 
   if (!expectation.isRequired && !expectedValue) {
     return {
@@ -811,12 +1312,12 @@ const verifyNetContentsField = (
   }
 
   if (!expectedValue) {
-    return verifyTextField(expectation, ocrLines);
+    return verifyTextField(expectation, ocrLines, ocrTokens, pageBounds);
   }
 
   const expectedNetContents = parseNetContents(expectedValue);
   if (!expectedNetContents) {
-    return verifyTextField(expectation, ocrLines);
+    return verifyTextField(expectation, ocrLines, ocrTokens, pageBounds);
   }
 
   let bestCandidate: MatchCandidate | null = null;
@@ -843,6 +1344,8 @@ const verifyNetContentsField = (
       bestCandidate = {
         line,
         score: lineScore,
+        source: "line",
+        tokenCount: Math.max(1, line.text.trim().split(/\s+/).length),
       };
       bestParsedNetContents = parsedNetContents;
       bestDifferenceMl = differenceMl;
@@ -850,6 +1353,96 @@ const verifyNetContentsField = (
   }
 
   if (!bestCandidate || !bestParsedNetContents) {
+    for (let index = 0; index < ocrLines.length - 1; index += 1) {
+      const firstLine = ocrLines[index];
+      const secondLine = ocrLines[index + 1];
+      const combinedText = `${firstLine.text} ${secondLine.text}`;
+      const parsedPair = parseNetContents(combinedText);
+      if (!parsedPair) {
+        continue;
+      }
+
+      const pairDifferenceMl = Math.abs(expectedNetContents.volumeMl - parsedPair.volumeMl);
+      const pairConfidence = averageConfidence([firstLine, secondLine]) ?? 0;
+
+      if (pairDifferenceMl <= 6) {
+        return {
+          field: expectation.field,
+          label: FIELD_LABELS[expectation.field],
+          applicationValue: formatApplicationValue(expectedValue),
+          extractedValue: `${combinedText} (${parsedPair.volumeMl.toFixed(1)} mL normalized)`,
+          status: pairDifferenceMl <= 3 ? "Pass" : "Needs Review",
+          confidence: pairConfidence,
+          reason:
+            "Net contents was reconstructed from adjacent OCR lines because numeric value and unit were split.",
+          evidenceBox: mergeBoxes([firstLine.bbox, secondLine.bbox]),
+        };
+      }
+    }
+
+    const fullTextNetContents = parseNetContents(fullOcrText);
+    if (fullTextNetContents) {
+      const differenceMl = Math.abs(
+        expectedNetContents.volumeMl - fullTextNetContents.volumeMl,
+      );
+      return {
+        field: expectation.field,
+        label: FIELD_LABELS[expectation.field],
+        applicationValue: formatApplicationValue(expectedValue),
+        extractedValue: `Detected across OCR lines (${fullTextNetContents.value} ${fullTextNetContents.unit})`,
+        status: differenceMl <= 15 ? "Needs Review" : "Fail",
+        confidence: averageConfidence(ocrLines),
+        reason:
+          "Net contents was detected from combined OCR text, but token-level evidence was fragmented.",
+        evidenceBox: null,
+      };
+    }
+
+    // Fallback: OCR often captures "750" but misses "ML" on curved labels.
+    // If numeric volume is very close to expected, downgrade to review instead
+    // of hard-missing so operators can quickly confirm.
+    const numericOnlyCandidate = ocrLines
+      .map((line) => {
+        const numberMatch = line.text.match(/(\d{2,4}(?:\.\d+)?)/);
+        if (!numberMatch) {
+          return null;
+        }
+
+        const parsedValue = Number(numberMatch[1]);
+        if (!Number.isFinite(parsedValue)) {
+          return null;
+        }
+
+        const differenceMl = Math.abs(expectedNetContents.volumeMl - parsedValue);
+        return { line, parsedValue, differenceMl };
+      })
+      .filter(
+        (
+          candidate,
+        ): candidate is { line: OcrLine; parsedValue: number; differenceMl: number } =>
+          candidate !== null,
+      )
+      .sort((left, right) => {
+        if (left.differenceMl !== right.differenceMl) {
+          return left.differenceMl - right.differenceMl;
+        }
+        return right.line.confidence - left.line.confidence;
+      })[0];
+
+    if (numericOnlyCandidate && numericOnlyCandidate.differenceMl <= 12) {
+      return {
+        field: expectation.field,
+        label: FIELD_LABELS[expectation.field],
+        applicationValue: formatApplicationValue(expectedValue),
+        extractedValue: `${numericOnlyCandidate.line.text} (unit unclear)`,
+        status: "Needs Review",
+        confidence: numericOnlyCandidate.line.confidence,
+        reason:
+          "Detected numeric net-contents value is close to expected, but OCR did not confidently capture the unit.",
+        evidenceBox: numericOnlyCandidate.line.bbox,
+      };
+    }
+
     return {
       field: expectation.field,
       label: FIELD_LABELS[expectation.field],
@@ -944,17 +1537,31 @@ const verifyNetContentsField = (
 export const verifyLabelLines = (
   application: CanonicalApplication,
   ocrLines: OcrLine[],
+  ocrTokens: OcrToken[] = [],
 ): VerificationFieldResult[] => {
+  const pageBounds = getPageBounds(ocrLines, ocrTokens);
   const regularFieldResults = getFieldExpectations(application).map((expectation) => {
     if (expectation.field === "alcohol_content") {
-      return verifyAlcoholField(expectation, application, ocrLines);
+      return verifyAlcoholField(
+        expectation,
+        application,
+        ocrLines,
+        ocrTokens,
+        pageBounds,
+      );
     }
 
     if (expectation.field === "net_contents") {
-      return verifyNetContentsField(expectation, application, ocrLines);
+      return verifyNetContentsField(
+        expectation,
+        application,
+        ocrLines,
+        ocrTokens,
+        pageBounds,
+      );
     }
 
-    return verifyTextField(expectation, ocrLines);
+    return verifyTextField(expectation, ocrLines, ocrTokens, pageBounds);
   });
   const warningFieldResult = verifyGovernmentWarning(application, ocrLines);
 

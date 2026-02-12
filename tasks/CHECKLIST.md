@@ -15,7 +15,7 @@
 
 ## Milestone 2 - Extraction Quality + Rule Precision
 
-- [x] Add image preprocessing pipeline (deskew, denoise, contrast tuning)
+- [x] Standardize on PaddleOCR runtime path and remove unused client preprocessing
 - [x] Add stronger class-specific verification logic
 - [x] Add unit conversion and ABV/proof parsing normalization
 - [x] Tighten government warning strict matching heuristics

@@ -3,6 +3,16 @@
 import type { ChangeEvent } from "react";
 
 type UploadsPanelProps = {
+  fixtureOptions: Array<{
+    id: string;
+    formFileName: string;
+    labelFileName: string;
+  }>;
+  selectedFixtureId: string;
+  isFixtureLoading: boolean;
+  fixtureError: string | null;
+  handleFixtureSelection: (fixtureId: string) => void | Promise<void>;
+  handleLoadFixture: () => void;
   labelFileName: string | null;
   jsonFileName: string | null;
   jsonError: string | null;
@@ -18,6 +28,12 @@ type UploadsPanelProps = {
 };
 
 export const UploadsPanel = ({
+  fixtureOptions,
+  selectedFixtureId,
+  isFixtureLoading,
+  fixtureError,
+  handleFixtureSelection,
+  handleLoadFixture,
   labelFileName,
   jsonFileName,
   jsonError,
@@ -37,6 +53,47 @@ export const UploadsPanel = ({
       <p className="mt-1 text-xs text-slate-600">
         Milestone 1 supports both PRD schema and provided legacy test-form JSON.
       </p>
+
+      <div className="mt-4 rounded-lg border border-slate-300 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <label
+            htmlFor="fixture-select"
+            className="text-xs font-medium uppercase tracking-wide text-slate-500"
+          >
+            Quick load fixture (auto-run)
+          </label>
+          <select
+            id="fixture-select"
+            aria-label="Select test fixture combination"
+            className="min-w-[220px] rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            value={selectedFixtureId}
+            onChange={(event) => {
+              void handleFixtureSelection(event.target.value);
+            }}
+          >
+            <option value="">Select a label/form pair</option>
+            {fixtureOptions.map((fixture) => (
+              <option key={fixture.id} value={fixture.id}>
+                {fixture.id} ({fixture.labelFileName} + {fixture.formFileName})
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            aria-label="Load selected fixture files"
+            disabled={!selectedFixtureId || isFixtureLoading}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+            onClick={handleLoadFixture}
+          >
+            {isFixtureLoading ? "Loading..." : "Load Only"}
+          </button>
+        </div>
+        {fixtureError && (
+          <p className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            {fixtureError}
+          </p>
+        )}
+      </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <label className="flex flex-col gap-2 rounded-lg border border-slate-300 p-3 text-sm text-slate-800">

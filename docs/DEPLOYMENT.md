@@ -1,57 +1,91 @@
 # Deployment Guide (Internal)
 
-This app is designed for standalone internal deployment without outbound cloud ML dependencies.
+This deployment now uses a Dockerized PaddleOCR backend service and a Next.js frontend.
 
 ## 1) Runtime Requirements
 
 - Node.js 20+
 - npm 10+
-- Modern browser with WebAssembly support (for local OCR)
+- Docker Engine with Compose plugin
 
-## 2) Install and Build
+## 2) Components
+
+- Next.js app (UI + verification + OCR proxy route)
+- PaddleOCR service container (`services/paddle-ocr`)
+
+## 3) Environment Variables
+
+- `OCR_SERVICE_URL` (optional)
+  - Default: `http://localhost:8001/ocr`
+  - Set this if OCR service runs on a different host/port
+
+## 4) Local/Server Startup Sequence
+
+1. Install dependencies:
 
 ```bash
 npm install
+```
+
+2. Start OCR service:
+
+```bash
+npm run ocr:up
+```
+
+3. Run checks and build:
+
+```bash
 npm run check
 npm run build
 ```
 
-Optional performance benchmark:
-
-```bash
-npm run benchmark:p95
-```
-
-## 3) Start in Production
+4. Start app:
 
 ```bash
 npm run start
 ```
 
-Default port is `3000`. Override with:
+Default app port is `3000`. Override if needed:
 
 ```bash
 PORT=8080 npm run start
 ```
 
-## 4) Internal Network Deployment Notes
+Stop OCR service:
 
-- Place the app behind internal reverse proxy/TLS.
-- Restrict access to authenticated internal users.
-- Prefer deployment in a network segment with no public ingress.
-- Do not expose the server directly to the public internet.
+```bash
+npm run ocr:down
+```
 
-## 5) Data Handling and Retention
+## 5) Security and Network Notes
 
-- OCR and verification processing is local/session-scoped.
-- Uploaded transient artifacts are cleared after each verification run.
-- Operators can manually clear all session artifacts via the UI.
-- Do not configure external analytics for sensitive payload capture.
+- Place both services behind internal reverse proxy/TLS.
+- Restrict app and OCR service to internal network access.
+- Avoid exposing OCR container directly to public networks.
+- Enforce authentication/authorization at gateway/app layer.
 
-## 6) Operational Validation Checklist
+## 6) Data Handling and Retention
 
-- `npm run check` passes in deployment image
-- `npm run build` succeeds
-- `npm run benchmark:p95` reviewed
-- sample upload/verification works in production environment
-- operator diagnostics panel displays p95, confidence, and error telemetry
+- Upload payloads are proxied to OCR service and processed transiently.
+- Session cleanup is applied after each verification run.
+- Operators can manually clear artifacts in the UI.
+- Avoid attaching external analytics to raw OCR payloads.
+
+## 7) Troubleshooting
+
+- OCR route returns 500:
+  - Confirm OCR container is up (`docker ps`).
+  - Check OCR health: `GET http://localhost:8001/health`.
+  - Verify `OCR_SERVICE_URL` matches reachable endpoint.
+- OCR returns no lines:
+  - Inspect OCR service logs and diagnostics warnings in app UI.
+  - Validate image format support and payload size.
+
+## 8) Operational Validation Checklist
+
+- `npm run check` passes.
+- `npm run build` succeeds.
+- `npm run benchmark:p95` reviewed.
+- Manual run on `test4.png` and `test8.png` succeeds.
+- Operator diagnostics show Paddle model timings and token/line counts.

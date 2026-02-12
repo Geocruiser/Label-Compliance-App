@@ -16,7 +16,7 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
 - Core responsibilities:
   - manage local UI state
   - parse/validate input JSON
-  - run local OCR
+  - proxy OCR requests to backend OCR service
   - execute baseline matching rules
   - render explainability overlays
 
@@ -60,13 +60,14 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
 ### OCR Layer
 
 - `ocr.ts`
-  - local OCR via `tesseract.js` with dual-pass quality selection
-  - orientation detection and right-angle auto-rotation
-  - extracts OCR lines with confidence + bounding boxes
-  - no outbound cloud ML API dependency
-- `image-preprocess.ts`
-  - local preprocessing (grayscale, denoise, contrast, thresholding)
-  - canvas-based image transformation utilities
+  - client adapter calling `/api/ocr`
+  - receives normalized line/token OCR outputs
+- `app/api/ocr/route.ts`
+  - server OCR proxy route
+  - forwards image payloads to PaddleOCR service
+- `services/paddle-ocr/app.py`
+  - FastAPI service wrapping PaddleOCR inference
+  - returns line and token boxes with confidence
 
 ## Folder Structure
 
@@ -77,6 +78,8 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
 ├── scripts/
 │   ├── benchmark-p95.ts
 │   └── README.md
+├── services/
+│   └── paddle-ocr/
 ├── tasks/
 │   └── CHECKLIST.md
 ├── docs/
@@ -94,6 +97,7 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
 │   └── unit/
 └── src/
     ├── app/
+    │   ├── api/ocr/route.ts
     │   ├── globals.css
     │   ├── layout.tsx
     │   └── page.tsx
@@ -107,9 +111,9 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
     └── lib/
         ├── class-rules.ts
         ├── constants.ts
-        ├── image-preprocess.ts
         ├── normalization.ts
         ├── ocr.ts
+        ├── paddle-normalize.ts
         ├── policy/
         ├── performance.ts
         ├── schemas.ts
@@ -132,8 +136,7 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
 
 ### Milestone 2 - Extraction Quality + Rule Precision (Implemented)
 
-- OCR preprocessing with denoise/contrast/thresholding pipeline
-- Orientation auto-rotation and dual-pass OCR quality selection
+- PaddleOCR-based extraction quality improvements and output normalization
 - Class-aware matching profiles (wine/beer/distilled)
 - Unit normalization and ABV/proof parser-driven comparisons
 - Stricter warning validation heuristics and confidence-based outcomes

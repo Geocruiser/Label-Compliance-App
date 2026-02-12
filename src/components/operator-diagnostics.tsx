@@ -58,6 +58,25 @@ export const OperatorDiagnostics = ({
     verificationResult?.fields
       .filter((result) => result.confidence !== null && result.confidence < 0.65)
       .map((result) => result.label) ?? [];
+  const evidenceSourceCounts =
+    verificationResult?.fields.reduce(
+      (counts, result) => {
+        const source = result.evidenceSource ?? "none";
+        counts[source] += 1;
+        return counts;
+      },
+      { word: 0, line: 0, none: 0 },
+    ) ?? { word: 0, line: 0, none: 0 };
+  const oversizedFields =
+    verificationResult?.fields
+      .filter((result) => Boolean(result.evidenceOversized))
+      .map((result) => result.label) ?? [];
+  const averageEvidenceTokens =
+    verificationResult && verificationResult.fields.length > 0
+      ? verificationResult.fields.reduce((total, result) => {
+          return total + (result.evidenceTokenCount ?? 0);
+        }, 0) / verificationResult.fields.length
+      : null;
 
   const targetP95Ms = 5000;
   const p95PassesTarget =
@@ -110,6 +129,16 @@ export const OperatorDiagnostics = ({
             {verificationResult?.ocrDiagnostics.cleanupApplied ? "Applied" : "N/A"}
           </div>
         </div>
+        <div className="rounded-md bg-slate-100 px-3 py-2">
+          <div className="text-[11px] uppercase text-slate-500">
+            Avg Evidence Tokens
+          </div>
+          <div className="mt-1 text-sm font-semibold text-slate-900">
+            {averageEvidenceTokens === null
+              ? "N/A"
+              : averageEvidenceTokens.toFixed(1)}
+          </div>
+        </div>
       </div>
 
       {verificationResult && (
@@ -130,6 +159,10 @@ export const OperatorDiagnostics = ({
                 ? lowConfidenceFields.join(", ")
                 : "None"}
             </div>
+            <div className="mt-1 text-xs text-slate-600">
+              Oversized evidence boxes:{" "}
+              {oversizedFields.length > 0 ? oversizedFields.join(", ") : "None"}
+            </div>
           </div>
 
           <div className="rounded-lg border border-slate-200 p-3">
@@ -137,29 +170,31 @@ export const OperatorDiagnostics = ({
               OCR Runtime Diagnostics
             </h3>
             <div className="mt-2 space-y-1 text-xs text-slate-700">
-              <div>Selected pipeline: {verificationResult.ocrDiagnostics.selectedPipeline}</div>
               <div>
-                Stage durations: preprocess{" "}
-                {formatDuration(verificationResult.ocrDiagnostics.preprocessMs)}, detect{" "}
-                {formatDuration(verificationResult.ocrDiagnostics.detectionMs)}, preprocessed
-                OCR{" "}
-                {formatDuration(
-                  verificationResult.ocrDiagnostics.preprocessedRecognizeMs,
-                )}
-                , raw OCR {formatDuration(verificationResult.ocrDiagnostics.rawRecognizeMs)}
+                OCR model: {verificationResult.ocrDiagnostics.model}
               </div>
               <div>
-                Pipeline line counts: preprocessed{" "}
-                {verificationResult.ocrDiagnostics.preprocessedLineCount}, raw{" "}
-                {verificationResult.ocrDiagnostics.rawLineCount}
+                Timings: service inference{" "}
+                {formatDuration(verificationResult.ocrDiagnostics.inferenceMs)}, API
+                round-trip{" "}
+                {formatDuration(verificationResult.ocrDiagnostics.apiRoundTripMs)},
+                total OCR {formatDuration(verificationResult.ocrDiagnostics.totalOcrMs)}
+              </div>
+              <div>
+                OCR line count: {verificationResult.ocrDiagnostics.lineCount}
+              </div>
+              <div>
+                OCR token count: {verificationResult.ocrDiagnostics.tokenCount}
+              </div>
+              <div>
+                Evidence sources: word {evidenceSourceCounts.word}, line{" "}
+                {evidenceSourceCounts.line}, none {evidenceSourceCounts.none}
               </div>
               <div>
                 Cleared transient artifacts:{" "}
-                {verificationResult.ocrDiagnostics.transientArtifactsCleared.join(", ")}
-              </div>
-              <div>
-                Preprocess steps:{" "}
-                {verificationResult.ocrDiagnostics.preprocessSteps.join(", ")}
+                {verificationResult.ocrDiagnostics.transientArtifactsCleared.length > 0
+                  ? verificationResult.ocrDiagnostics.transientArtifactsCleared.join(", ")
+                  : "None"}
               </div>
               <div>
                 Warnings:{" "}

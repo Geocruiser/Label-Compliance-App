@@ -18,10 +18,23 @@ export type BoundingBox = {
   y1: number;
 };
 
+export type PolygonPoint = {
+  x: number;
+  y: number;
+};
+
 export type OcrLine = {
   text: string;
   confidence: number;
   bbox: BoundingBox;
+  polygon?: PolygonPoint[] | null;
+};
+
+export type OcrToken = {
+  text: string;
+  confidence: number;
+  bbox: BoundingBox;
+  lineId: string | null;
 };
 
 export type CanonicalApplication = {
@@ -50,18 +63,19 @@ export type VerificationFieldResult = {
   confidence: number | null;
   reason: string;
   evidenceBox: BoundingBox | null;
+  evidenceSource?: "word" | "line" | "none";
+  evidenceTokenCount?: number;
+  evidenceBoxAreaRatio?: number | null;
+  evidenceOversized?: boolean;
 };
 
 export type OcrRunDiagnostics = {
   totalOcrMs: number;
-  preprocessMs: number;
-  preprocessSteps: string[];
-  detectionMs: number;
-  preprocessedRecognizeMs: number;
-  rawRecognizeMs: number;
-  selectedPipeline: "preprocessed" | "raw";
-  preprocessedLineCount: number;
-  rawLineCount: number;
+  lineCount: number;
+  tokenCount: number;
+  model: string;
+  inferenceMs: number;
+  apiRoundTripMs: number;
   cleanupApplied: boolean;
   transientArtifactsCleared: string[];
   warnings: string[];
@@ -70,6 +84,7 @@ export type OcrRunDiagnostics = {
 export type VerificationResult = {
   fields: VerificationFieldResult[];
   ocrLines: OcrLine[];
+  ocrTokens: OcrToken[];
   ocrDiagnostics: OcrRunDiagnostics;
   startedAt: string;
   endedAt: string;
