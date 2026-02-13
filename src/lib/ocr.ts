@@ -16,12 +16,31 @@ type OcrRunResult = {
   diagnostics: OcrRunDiagnostics;
 };
 
+const DEMO_OCR_SIMULATED_DELAY_MIN_MS = 3000;
+const DEMO_OCR_SIMULATED_DELAY_MAX_MS = 6000;
+
+const delay = (durationMs: number) => {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, durationMs);
+  });
+};
+
+const getSimulatedDemoOcrDelayMs = () => {
+  const delayRangeMs =
+    DEMO_OCR_SIMULATED_DELAY_MAX_MS - DEMO_OCR_SIMULATED_DELAY_MIN_MS;
+  return (
+    DEMO_OCR_SIMULATED_DELAY_MIN_MS +
+    Math.round(Math.random() * delayRangeMs)
+  );
+};
+
 export const runLocalOcr = async (
   imageFile: File,
   handleProgress?: OcrProgressHandler,
 ): Promise<OcrRunResult> => {
   if (isDemoMode) {
     handleProgress?.(0.1);
+    await delay(getSimulatedDemoOcrDelayMs());
     const startedAt = performance.now();
     const demoPayload = await loadDemoOcrPayloadForLabel(imageFile.name);
     handleProgress?.(0.85);

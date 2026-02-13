@@ -10,6 +10,7 @@ This deployment supports two modes:
 - Node.js 20+
 - npm 10+
 
+
 ## 2) Components
 
 - Next.js app (UI + verification + Datalab OCR proxy route)
