@@ -2,6 +2,7 @@ export type FixtureOption = {
   id: string;
   formFileName: string;
   labelFileName: string;
+  displayName?: string;
 };
 
 export type FixtureLoadPayload = {

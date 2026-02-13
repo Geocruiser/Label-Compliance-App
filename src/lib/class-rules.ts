@@ -1,9 +1,7 @@
-import type { FieldKey } from "@/lib/types";
 import {
   getFieldRequirementProfile as resolveFieldRequirementProfile,
   getRequirementMatrixForClass,
 } from "@/lib/policy/requirement-matrix";
-import { getSupportingRuleIdsForField } from "@/lib/policy/rulesets";
 
 export type UnitSystem = "metric" | "us_customary" | "neutral";
 
@@ -19,13 +17,6 @@ export const getFieldRequirementProfile = (
   field: Parameters<typeof resolveFieldRequirementProfile>[1],
 ) => {
   return resolveFieldRequirementProfile(application, field);
-};
-
-export const getRuleIdsForField = (
-  alcoholClass: Parameters<typeof getSupportingRuleIdsForField>[0],
-  field: FieldKey,
-) => {
-  return getSupportingRuleIdsForField(alcoholClass, field);
 };
 
 export const getNetUnitSystemForClass = (

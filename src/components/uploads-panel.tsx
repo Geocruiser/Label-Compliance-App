@@ -8,6 +8,7 @@ type UploadsPanelProps = {
     id: string;
     formFileName: string;
     labelFileName: string;
+    displayName?: string;
   }>;
   selectedFixtureId: string;
   isFixtureLoading: boolean;
@@ -81,10 +82,12 @@ export const UploadsPanel = ({
               void handleFixtureSelection(event.target.value);
             }}
           >
-            <option value="">Select a label/form pair</option>
+            <option value="">Select a demo preset</option>
             {fixtureOptions.map((fixture) => (
               <option key={fixture.id} value={fixture.id}>
-                {fixture.id} ({fixture.labelFileName} + {fixture.formFileName})
+                {fixture.displayName
+                  ? fixture.displayName
+                  : `${fixture.id} (${fixture.labelFileName} + ${fixture.formFileName})`}
               </option>
             ))}
           </select>

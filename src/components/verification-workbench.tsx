@@ -42,6 +42,7 @@ type WorkbenchBatchJob = {
 
 const MAX_BATCH_SIZE = 10;
 const SELECTION_PREVIEW_LIMIT = 3;
+const BATCH_ALL_DEMO_FIXTURES_ID = "__batch_all_demo_fixtures__";
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null;
@@ -198,7 +199,16 @@ export const VerificationWorkbench = () => {
     const loadFixtureList = async () => {
       try {
         if (isDemoMode) {
-          setFixtureOptions(listDemoFixtures());
+          const demoFixtures = listDemoFixtures();
+          setFixtureOptions([
+            {
+              id: BATCH_ALL_DEMO_FIXTURES_ID,
+              formFileName: "all_demo_forms",
+              labelFileName: "all_demo_labels",
+              displayName: "Batch Process (All 8 Samples)",
+            },
+            ...demoFixtures,
+          ]);
           return;
         }
 
@@ -427,7 +437,6 @@ export const VerificationWorkbench = () => {
     const runErrors: string[] = [];
 
     for (let index = 0; index < nextJobs.length; index += 1) {
-      setActiveJobIndex(index);
       nextJobs[index] = {
         ...nextJobs[index],
         status: "running",
@@ -462,14 +471,88 @@ export const VerificationWorkbench = () => {
       }
 
       setBatchJobs([...nextJobs]);
+      setActiveJobIndex((currentIndex) => {
+        const currentJob = nextJobs[currentIndex];
+        if (!currentJob) {
+          return index;
+        }
+
+        if (
+          currentJob.verificationResult !== null
+          || currentJob.status === "failed"
+          || currentJob.status === "completed"
+        ) {
+          return currentIndex;
+        }
+
+        return index;
+      });
     }
 
     if (runErrors.length > 0) {
       setRunError(`Completed with errors: ${runErrors.join(" | ")}`);
     }
 
-    setActiveJobIndex(0);
     setIsRunning(false);
+  };
+
+  const buildJobFromFixturePayload = (payload: FixtureLoadPayload): WorkbenchBatchJob => {
+    const labelBytes = Uint8Array.from(atob(payload.labelBase64), (character) =>
+      character.charCodeAt(0),
+    );
+    const labelBlob = new Blob([labelBytes], { type: payload.labelMimeType });
+    const loadedLabelFile = new File([labelBlob], payload.labelFileName, {
+      type: payload.labelMimeType,
+    });
+    const loadedApplication = parseApplicationJson(payload.formJson);
+    const previewUrl = `data:${payload.labelMimeType};base64,${payload.labelBase64}`;
+
+    return {
+      labelId: normalizeStem(payload.labelFileName) || payload.id,
+      labelFileName: payload.labelFileName,
+      jsonFileName: payload.formFileName,
+      labelFile: loadedLabelFile,
+      previewImageUrl: previewUrl,
+      application: loadedApplication,
+      status: "queued",
+      verificationResult: null,
+      error: null,
+      decision: "undecided",
+    };
+  };
+
+  const loadAllDemoFixtures = async (autoRun: boolean) => {
+    setIsFixtureLoading(true);
+    setFixtureError(null);
+    setRunError(null);
+    setJsonError(null);
+    setBatchJobs([]);
+    setActiveJobIndex(0);
+
+    try {
+      const demoFixtureIds = listDemoFixtures().map((fixture) => fixture.id);
+      const payloads = await Promise.all(
+        demoFixtureIds.map(async (fixtureId) => loadDemoFixtureById(fixtureId)),
+      );
+      const loadedJobs = payloads.map((payload) => buildJobFromFixturePayload(payload));
+
+      setUploadedLabelFiles([]);
+      setUploadedJsonFiles([]);
+      setBatchJobs(loadedJobs);
+      setActiveJobIndex(0);
+      setSelectedField(null);
+
+      if (autoRun) {
+        await runBatchJobs(loadedJobs);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to load demo fixture batch.";
+      setFixtureError(message);
+      setRunError(message);
+    } finally {
+      setIsFixtureLoading(false);
+    }
   };
 
   const loadFixtureById = async (fixtureId: string, autoRun: boolean) => {
@@ -504,28 +587,7 @@ export const VerificationWorkbench = () => {
             return responsePayload;
           })();
 
-      const labelBytes = Uint8Array.from(atob(payload.labelBase64), (character) =>
-        character.charCodeAt(0),
-      );
-      const labelBlob = new Blob([labelBytes], { type: payload.labelMimeType });
-      const loadedLabelFile = new File([labelBlob], payload.labelFileName, {
-        type: payload.labelMimeType,
-      });
-      const loadedApplication = parseApplicationJson(payload.formJson);
-      const previewUrl = `data:${payload.labelMimeType};base64,${payload.labelBase64}`;
-
-      const loadedJob: WorkbenchBatchJob = {
-        labelId: normalizeStem(payload.labelFileName) || payload.id,
-        labelFileName: payload.labelFileName,
-        jsonFileName: payload.formFileName,
-        labelFile: loadedLabelFile,
-        previewImageUrl: previewUrl,
-        application: loadedApplication,
-        status: "queued",
-        verificationResult: null,
-        error: null,
-        decision: "undecided",
-      };
+      const loadedJob = buildJobFromFixturePayload(payload);
 
       setUploadedLabelFiles([]);
       setUploadedJsonFiles([]);
@@ -549,6 +611,11 @@ export const VerificationWorkbench = () => {
   const handleFixtureSelection = async (fixtureId: string) => {
     setSelectedFixtureId(fixtureId);
     if (!fixtureId) {
+      return;
+    }
+
+    if (isDemoMode && fixtureId === BATCH_ALL_DEMO_FIXTURES_ID) {
+      await loadAllDemoFixtures(true);
       return;
     }
 

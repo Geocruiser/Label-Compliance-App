@@ -51,11 +51,3 @@ export const diceCoefficient = (left: string, right: string) => {
 export const normalizedIncludes = (haystack: string, needle: string) => {
   return normalizeText(haystack).includes(normalizeText(needle));
 };
-
-export const percentFromConfidence = (confidence: number | null) => {
-  if (confidence === null || Number.isNaN(confidence)) {
-    return null;
-  }
-
-  return Math.max(0, Math.min(100, Math.round(confidence * 100)));
-};
