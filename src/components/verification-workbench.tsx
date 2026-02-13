@@ -223,6 +223,10 @@ export const VerificationWorkbench = () => {
   }, []);
 
   const handleLabelUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    if (isDemoMode) {
+      return;
+    }
+
     const nextFiles = Array.from(event.target.files ?? []);
     setUploadedLabelFiles(nextFiles);
     setSelectedFixtureId("");
@@ -235,6 +239,10 @@ export const VerificationWorkbench = () => {
   };
 
   const handleJsonUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    if (isDemoMode) {
+      return;
+    }
+
     const nextFiles = Array.from(event.target.files ?? []);
     setUploadedJsonFiles(nextFiles);
     setSelectedFixtureId("");
@@ -650,6 +658,7 @@ export const VerificationWorkbench = () => {
   return (
     <div className="grid gap-4">
       <UploadsPanel
+        isDemoMode={isDemoMode}
         fixtureOptions={fixtureOptions}
         selectedFixtureId={selectedFixtureId}
         isFixtureLoading={isFixtureLoading}

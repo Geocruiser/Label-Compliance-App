@@ -3,6 +3,7 @@
 import type { ChangeEvent } from "react";
 
 type UploadsPanelProps = {
+  isDemoMode: boolean;
   fixtureOptions: Array<{
     id: string;
     formFileName: string;
@@ -33,6 +34,7 @@ type UploadsPanelProps = {
 };
 
 export const UploadsPanel = ({
+  isDemoMode,
   fixtureOptions,
   selectedFixtureId,
   isFixtureLoading,
@@ -102,6 +104,7 @@ export const UploadsPanel = ({
             accept="image/png,image/jpeg,image/jpg,image/webp"
             aria-label="Upload label image file"
             multiple
+            disabled={isDemoMode}
             className="block w-full rounded-md border border-slate-300 px-3 py-2 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-indigo-700"
             onChange={handleLabelUpload}
           />
@@ -115,6 +118,7 @@ export const UploadsPanel = ({
             accept="application/json,.json"
             aria-label="Upload application JSON file"
             multiple
+            disabled={isDemoMode}
             className="block w-full rounded-md border border-slate-300 px-3 py-2 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-indigo-700"
             onChange={handleJsonUpload}
           />
@@ -128,6 +132,11 @@ export const UploadsPanel = ({
           ? ` Reviewing ${activeLabelId} (${activeBatchIndex + 1}/${batchCount}).`
           : ""}
       </p>
+      {isDemoMode && (
+        <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Demo mode is active. File uploads are disabled; use Demo Presets.
+        </p>
+      )}
       {batchCount > 0 && (
         <div className="mt-2 grid gap-2 text-[11px] text-slate-600 sm:grid-cols-2">
           <p className="rounded-md bg-slate-100 px-2.5 py-1.5">
