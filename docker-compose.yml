@@ -1,0 +1,12 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DATALAB_API_KEY: ${DATALAB_API_KEY}
+      DATALAB_BASE_URL: ${DATALAB_BASE_URL:-https://www.datalab.to}
+      DATALAB_MARKER_MODE: ${DATALAB_MARKER_MODE:-balanced}
+      PORT: "3000"

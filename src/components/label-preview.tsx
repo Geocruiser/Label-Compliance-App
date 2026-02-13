@@ -190,12 +190,6 @@ export const LabelPreview = ({
               </div>
             )}
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              Evidence: {renderedEvidenceBoxes.length}
-            </span>
-          </div>
         </div>
       )}
     </section>

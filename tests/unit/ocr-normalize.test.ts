@@ -156,4 +156,42 @@ describe("ocr response normalization", () => {
       height: 2304,
     });
   });
+
+  it("filters markdown image syntax and imagery narration text", () => {
+    const normalized = normalizeOcrResponse({
+      status: "complete",
+      runtime: 175,
+      json: {
+        children: [
+          {
+            block_type: "Page",
+            bbox: [0, 0, 1200, 1800],
+            children: [
+              {
+                block_type: "Text",
+                markdown: "![A decorative crest with vines](crest.png)",
+                bbox: [80, 70, 560, 130],
+              },
+              {
+                block_type: "Text",
+                text: "Image: a close-up of a bottle with ornate filigree",
+                bbox: [90, 160, 840, 240],
+              },
+              {
+                block_type: "SectionHeader",
+                text: "AMALFI COAST",
+                bbox: [120, 300, 520, 370],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(normalized.lines).toHaveLength(1);
+    expect(normalized.lines[0].text).toBe("AMALFI COAST");
+    expect(
+      normalized.lines.some((line) => /decorative crest|close-up of/i.test(line.text)),
+    ).toBe(false);
+  });
 });

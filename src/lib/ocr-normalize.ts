@@ -415,29 +415,56 @@ const stripHtmlToText = (value: string) => {
   return decodeHtmlEntities(stripped).replace(/\s+/g, " ").trim();
 };
 
-const isNonTextBlockType = (value: unknown) => {
+const stripMarkdownImageSyntax = (value: string) => {
+  return value
+    .replace(/!\[[^\]]*]\([^)]+\)/g, " ")
+    .replace(/!\[[^\]]*]\[[^\]]*]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const normalizeBlockType = (value: unknown) => {
   if (typeof value !== "string") {
-    return false;
+    return "";
   }
 
-  const normalized = value.toLowerCase();
+  return value.toLowerCase().replace(/[\s_-]+/g, "");
+};
+
+const isNonTextBlockType = (value: unknown) => {
+  const normalized = normalizeBlockType(value);
   const excludedTypes = new Set([
     "page",
+    "image",
     "picture",
     "figure",
+    "graphic",
+    "illustration",
+    "logo",
+    "seal",
+    "stamp",
     "table",
     "tableofcontents",
+    "caption",
+    "figurecaption",
+    "imagecaption",
+    "photocaption",
   ]);
   return excludedTypes.has(normalized);
 };
 
 const getObjectText = (shape: Record<string, unknown>): string => {
-  const keys = ["text", "raw_text", "line_text", "value", "content", "markdown"];
+  const keys = ["text", "raw_text", "line_text", "value", "content"];
   for (const key of keys) {
     const text = toStringValue(shape[key]).trim();
     if (text.length > 0) {
-      return text;
+      return text.replace(/\s+/g, " ").trim();
     }
+  }
+
+  const markdownValue = stripMarkdownImageSyntax(toStringValue(shape.markdown));
+  if (markdownValue.length > 0) {
+    return markdownValue;
   }
 
   const htmlValue = toStringValue(shape.html).trim();
@@ -446,6 +473,21 @@ const getObjectText = (shape: Record<string, unknown>): string => {
   }
 
   return "";
+};
+
+const isLikelyImageDescriptionText = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  const descriptionPatterns = [
+    /^(image|photo|picture|illustration|graphic|figure|logo)\s*[:\-]/,
+    /^(an?|the|this)\s+(image|photo|picture|illustration|graphic|label)\s+(shows|depicts|features)\b/,
+    /^(an?\s+)?close[- ]up\s+of\b/,
+  ];
+
+  return descriptionPatterns.some((pattern) => pattern.test(normalized));
 };
 
 const getObjectConfidence = (shape: Record<string, unknown>) => {
@@ -488,7 +530,14 @@ const collectMarkerLineCandidates = (
   const skipAsTextCandidate = isNonTextBlockType(shape.block_type);
   const text = getObjectText(shape);
   const bbox = getObjectBoundingBox(shape);
-  if (!skipAsTextCandidate && text.length > 0 && bbox && hasValidBoundingBox(bbox)) {
+  const skipAsImageryNarration = isLikelyImageDescriptionText(text);
+  if (
+    !skipAsTextCandidate &&
+    !skipAsImageryNarration &&
+    text.length > 0 &&
+    bbox &&
+    hasValidBoundingBox(bbox)
+  ) {
     results.push({
       text,
       confidence: getObjectConfidence(shape),

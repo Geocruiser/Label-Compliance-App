@@ -8,9 +8,8 @@ const HomePage = () => {
           Label Compliance App
         </h1>
         <p className="mt-2 max-w-4xl text-sm text-slate-700">
-          Upload one label image and one application JSON file, then run local
-          verification to generate field-level Pass / Fail / Needs Review /
-          Missing results with evidence highlighting.
+          Upload one or more label images and application JSON files, then run
+          verification to generate results with evidence highlighting.
         </p>
       </header>
       <VerificationWorkbench />

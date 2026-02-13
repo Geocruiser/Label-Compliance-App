@@ -12,12 +12,21 @@ type UploadsPanelProps = {
   isFixtureLoading: boolean;
   fixtureError: string | null;
   handleFixtureSelection: (fixtureId: string) => void | Promise<void>;
-  labelFileName: string | null;
-  jsonFileName: string | null;
+  labelSelectionSummary: string;
+  jsonSelectionSummary: string;
   jsonError: string | null;
   runError: string | null;
   isRunning: boolean;
   canRunVerification: boolean;
+  batchCount: number;
+  maxBatchSize: number;
+  activeBatchIndex: number | null;
+  activeLabelId: string | null;
+  processedCount: number;
+  completedCount: number;
+  failedCount: number;
+  decidedCount: number;
+  undecidedCount: number;
   handleLabelUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   handleJsonUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   handleRunVerification: () => void;
@@ -29,12 +38,21 @@ export const UploadsPanel = ({
   isFixtureLoading,
   fixtureError,
   handleFixtureSelection,
-  labelFileName,
-  jsonFileName,
+  labelSelectionSummary,
+  jsonSelectionSummary,
   jsonError,
   runError,
   isRunning,
   canRunVerification,
+  batchCount,
+  maxBatchSize,
+  activeBatchIndex,
+  activeLabelId,
+  processedCount,
+  completedCount,
+  failedCount,
+  decidedCount,
+  undecidedCount,
   handleLabelUpload,
   handleJsonUpload,
   handleRunVerification,
@@ -78,33 +96,49 @@ export const UploadsPanel = ({
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <label className="flex flex-col gap-2 rounded-lg border border-slate-300 p-2.5 text-sm text-slate-800">
-          <span className="font-medium">Label image (.png/.jpg/.jpeg)</span>
+          <span className="font-medium">Label images (.png/.jpg/.jpeg/.webp)</span>
           <input
             type="file"
             accept="image/png,image/jpeg,image/jpg,image/webp"
             aria-label="Upload label image file"
+            multiple
             className="block w-full rounded-md border border-slate-300 px-3 py-2 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-indigo-700"
             onChange={handleLabelUpload}
           />
-          <span className="text-xs text-slate-500">
-            {labelFileName ? `Selected: ${labelFileName}` : "No file selected"}
-          </span>
+          <span className="text-xs text-slate-500">{labelSelectionSummary}</span>
         </label>
 
         <label className="flex flex-col gap-2 rounded-lg border border-slate-300 p-2.5 text-sm text-slate-800">
-          <span className="font-medium">Application JSON</span>
+          <span className="font-medium">Application JSON files</span>
           <input
             type="file"
             accept="application/json,.json"
             aria-label="Upload application JSON file"
+            multiple
             className="block w-full rounded-md border border-slate-300 px-3 py-2 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-indigo-700"
             onChange={handleJsonUpload}
           />
-          <span className="text-xs text-slate-500">
-            {jsonFileName ? `Selected: ${jsonFileName}` : "No file selected"}
-          </span>
+          <span className="text-xs text-slate-500">{jsonSelectionSummary}</span>
         </label>
       </div>
+
+      <p className="mt-2 text-xs text-slate-600">
+        Batch size limit: {maxBatchSize}. Paired labels: {batchCount}.
+        {activeBatchIndex !== null && activeLabelId
+          ? ` Reviewing ${activeLabelId} (${activeBatchIndex + 1}/${batchCount}).`
+          : ""}
+      </p>
+      {batchCount > 0 && (
+        <div className="mt-2 grid gap-2 text-[11px] text-slate-600 sm:grid-cols-2">
+          <p className="rounded-md bg-slate-100 px-2.5 py-1.5">
+            Processed {processedCount}/{batchCount} (completed {completedCount}, failed{" "}
+            {failedCount})
+          </p>
+          <p className="rounded-md bg-slate-100 px-2.5 py-1.5">
+            Decisions {decidedCount}/{batchCount} (undecided {undecidedCount})
+          </p>
+        </div>
+      )}
 
       {jsonError && (
         <p className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">

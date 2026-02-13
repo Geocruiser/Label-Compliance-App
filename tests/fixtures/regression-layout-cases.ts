@@ -623,4 +623,31 @@ export const REGRESSION_LAYOUT_CASES: RegressionLayoutCase[] = [
       },
     },
   },
+  {
+    id: "non-warning-fields-are-case-insensitive",
+    applicationJson: {
+      cola_application_id: "REG-16",
+      brand_name: "GOLDEN OAK",
+      class_type_designation: "VODKA",
+      alcohol_content: "80 PROOF",
+      net_contents: "375 ML",
+      bottler_producer_name_address: null,
+      is_imported: true,
+      country_of_origin_import: "BARBADOS",
+      government_health_warning_required: true,
+    },
+    ocrLines: [
+      createLine("golden oak", 0, 0.92),
+      createLine("vodka", 1, 0.93),
+      createLine("80 proof", 2, 0.91),
+      createLine("375 ml", 3, 0.9),
+      createLine("barbados", 4, 0.91),
+      createLine(GOVERNMENT_WARNING_TEXT, 8, 0.92),
+    ],
+    expectedStatuses: {
+      brand_name: "Pass",
+      class_type_designation: "Pass",
+      country_of_origin: "Pass",
+    },
+  },
 ];

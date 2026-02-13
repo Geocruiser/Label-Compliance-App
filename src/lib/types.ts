@@ -1,4 +1,6 @@
 export type VerificationStatus = "Pass" | "Fail" | "Needs Review" | "Missing";
+export type BatchDecision = "approve" | "deny" | "undecided";
+export type BatchJobStatus = "queued" | "running" | "completed" | "failed";
 
 export type FieldKey =
   | "brand_name"
@@ -97,4 +99,9 @@ export type VerificationResult = {
   startedAt: string;
   endedAt: string;
   durationMs: number;
+};
+
+export type BatchJobSummary = {
+  labelId: string;
+  decision: BatchDecision;
 };

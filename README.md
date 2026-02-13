@@ -96,18 +96,42 @@ OCR now runs through Datalab Hosted Marker API:
 - Datalab response is normalized to `ocrLines` and `ocrTokens`
 - Existing verification and evidence logic consumes normalized output without UI workflow changes
 
+### Runtime Modes
+
+- `NEXT_PUBLIC_APP_MODE=demo` (default):
+  - Uses pre-generated fixture payloads from `assets/Response Data/`
+  - Does not require server API routes
+  - Intended for GitHub Pages PoC/demo hosting
+- `NEXT_PUBLIC_APP_MODE=api`:
+  - Uses real Next API routes (`/api/ocr`, `/api/test-fixtures`)
+  - Requires server env vars including `DATALAB_API_KEY`
+  - Intended for local/internal full-flow validation
+
 ### Local Startup (OCR + App)
 
 1. Install JS dependencies:
    - `npm install`
-2. Set server environment variables:
+2. Set client runtime mode:
+   - `NEXT_PUBLIC_APP_MODE=api`
+3. Set server environment variables:
    - `DATALAB_API_KEY=<your_key>`
    - optional: `DATALAB_BASE_URL=https://www.datalab.to`
    - optional: `DATALAB_MARKER_MODE=balanced`
-3. Start Next.js app:
+4. Start Next.js app:
    - `npm run dev`
-4. Open:
+5. Open:
    - `http://localhost:3000`
+
+### GitHub Pages PoC (Frontend Only)
+
+1. Ensure GitHub Pages is set to **GitHub Actions** in repository settings.
+2. Push to `main` or `Marker-Branch` (or manually trigger the workflow).
+3. Workflow `.github/workflows/deploy-pages.yml` runs `npm run build:pages`:
+   - switches to static export mode
+   - temporarily excludes `src/app/api/*` only during export build
+   - deploys `out/` to Pages
+4. The deployed site runs in `demo` mode using pre-generated fixture responses.
+5. Reviewers who need real API can clone the repo and run with `NEXT_PUBLIC_APP_MODE=api` plus their own `DATALAB_API_KEY`.
 
 ## OCR Evidence Box Precision Improvements
 
@@ -155,6 +179,8 @@ Recent updates improve evidence-box tightness with the OCR backend:
 - `src/lib/schemas.ts` - JSON schema parsing + canonical model conversion
 - `src/lib/ocr.ts` - OCR client adapter that calls `/api/ocr`
 - `src/lib/ocr-normalize.ts` - OCR provider response normalization
+- `src/lib/demo-fixtures.ts` - demo fixture loaders for static frontend mode
+- `src/lib/app-mode.ts` - runtime mode switch (`demo` vs `api`)
 - `src/app/api/ocr/route.ts` - Next.js OCR proxy route
 - `src/lib/value-parsers.ts` - ABV/proof and net-contents parsers
 - `src/lib/class-rules.ts` - class-aware requirement and unit policies
@@ -169,6 +195,7 @@ Recent updates improve evidence-box tightness with the OCR backend:
 - `tests/acceptance/verification-acceptance.test.ts` - deterministic acceptance suite
 - `tests/regression/layout-regression.test.ts` - edge-case regression fixtures
 - `scripts/benchmark-p95.ts` - deterministic p95 benchmark runner
+- `scripts/build-pages.mjs` - static Pages build helper (temporarily disables API routes)
 - `ARCHITECTURE.md` - architecture, folder structure, and milestone plan
 - `tasks/CHECKLIST.md` - implementation checklist and milestone tracker
 
