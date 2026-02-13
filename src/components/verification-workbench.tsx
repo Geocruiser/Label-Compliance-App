@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent } from "react";
 import { LabelPreview } from "@/components/label-preview";
-import { OperatorDiagnostics } from "@/components/operator-diagnostics";
 import { ResultsTable } from "@/components/results-table";
 import { UploadsPanel } from "@/components/uploads-panel";
 import { runLocalOcr } from "@/lib/ocr";
@@ -14,12 +13,6 @@ import type {
   VerificationResult,
 } from "@/lib/types";
 import { verifyLabelLines } from "@/lib/verification";
-
-type OperatorError = {
-  stage: "json_parse" | "verification_run";
-  message: string;
-  timestamp: string;
-};
 
 type FixtureOption = {
   id: string;
@@ -52,14 +45,6 @@ const toDataUrl = (file: File) => {
   });
 };
 
-const formatDuration = (durationMs: number) => {
-  if (durationMs < 1000) {
-    return `${durationMs} ms`;
-  }
-
-  return `${(durationMs / 1000).toFixed(2)} s`;
-};
-
 export const VerificationWorkbench = () => {
   const [fixtureOptions, setFixtureOptions] = useState<FixtureOption[]>([]);
   const [selectedFixtureId, setSelectedFixtureId] = useState("");
@@ -73,15 +58,9 @@ export const VerificationWorkbench = () => {
   const [jsonFileName, setJsonFileName] = useState<string | null>(null);
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  const [cleanupNote, setCleanupNote] = useState<string | null>(null);
   const [verificationResult, setVerificationResult] =
     useState<VerificationResult | null>(null);
-  const [runDurationsMs, setRunDurationsMs] = useState<number[]>([]);
-  const [lastError, setLastError] = useState<OperatorError | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [ocrProgressPercent, setOcrProgressPercent] = useState<number | null>(
-    null,
-  );
   const [selectedField, setSelectedField] = useState<FieldKey | null>(null);
 
   const canRunVerification = useMemo(() => {
@@ -111,19 +90,6 @@ export const VerificationWorkbench = () => {
     void loadFixtureList();
   }, []);
 
-  const handleClearSession = () => {
-    setLabelFile(null);
-    setPreviewImageUrl(null);
-    setApplication(null);
-    setJsonFileName(null);
-    setJsonError(null);
-    setRunError(null);
-    setCleanupNote("Session artifacts were cleared.");
-    setVerificationResult(null);
-    setOcrProgressPercent(null);
-    setSelectedField(null);
-  };
-
   const handleLabelUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
@@ -134,7 +100,6 @@ export const VerificationWorkbench = () => {
       const nextPreviewImageUrl = await toDataUrl(file);
       setPreviewImageUrl(nextPreviewImageUrl);
       setLabelFile(file);
-      setCleanupNote(null);
       setVerificationResult(null);
       setRunError(null);
       setSelectedField(null);
@@ -145,11 +110,6 @@ export const VerificationWorkbench = () => {
       const message =
         error instanceof Error ? error.message : "Unable to process label image.";
       setRunError(message);
-      setLastError({
-        stage: "verification_run",
-        message,
-        timestamp: new Date().toISOString(),
-      });
     }
   };
 
@@ -161,7 +121,6 @@ export const VerificationWorkbench = () => {
 
     setJsonFileName(file.name);
     setRunError(null);
-    setCleanupNote(null);
     setFixtureError(null);
 
     try {
@@ -181,21 +140,11 @@ export const VerificationWorkbench = () => {
       if (error instanceof Error) {
         const message = `Invalid application JSON: ${error.message}`;
         setJsonError(message);
-        setLastError({
-          stage: "json_parse",
-          message,
-          timestamp: new Date().toISOString(),
-        });
         return;
       }
 
       const message = "Invalid application JSON: unknown error";
       setJsonError(message);
-      setLastError({
-        stage: "json_parse",
-        message,
-        timestamp: new Date().toISOString(),
-      });
     }
   };
 
@@ -205,19 +154,16 @@ export const VerificationWorkbench = () => {
   ) => {
     setIsRunning(true);
     setRunError(null);
-    setCleanupNote(null);
     setSelectedField(null);
-    setOcrProgressPercent(0);
 
     const startTimeMs = Date.now();
     const startPerformanceTime = performance.now();
 
     try {
-      const ocrResult = await runLocalOcr(nextLabelFile, (progress) => {
-        setOcrProgressPercent(Math.round(progress * 100));
-      });
+      const ocrResult = await runLocalOcr(nextLabelFile);
       const ocrLines = ocrResult.lines;
       const ocrTokens = ocrResult.tokens;
+      const ocrCoordinateSpace = ocrResult.coordinateSpace;
       const fieldResults = verifyLabelLines(nextApplication, ocrLines, ocrTokens);
       const endPerformanceTime = performance.now();
       const endTimeMs = Date.now();
@@ -227,42 +173,25 @@ export const VerificationWorkbench = () => {
         fields: fieldResults,
         ocrLines,
         ocrTokens,
+        ocrCoordinateSpace,
         ocrDiagnostics: ocrResult.diagnostics,
         startedAt: new Date(startTimeMs).toISOString(),
         endedAt: new Date(endTimeMs).toISOString(),
         durationMs,
       });
-      setRunDurationsMs((currentDurations) => {
-        const nextDurations = [...currentDurations, durationMs];
-        return nextDurations.slice(-100);
-      });
     } catch (error) {
       if (error instanceof Error) {
         const message = `Verification failed: ${error.message}`;
         setRunError(message);
-        setLastError({
-          stage: "verification_run",
-          message,
-          timestamp: new Date().toISOString(),
-        });
       } else {
         const message = "Verification failed: unknown error";
         setRunError(message);
-        setLastError({
-          stage: "verification_run",
-          message,
-          timestamp: new Date().toISOString(),
-        });
       }
     } finally {
       setIsRunning(false);
-      setOcrProgressPercent(null);
       setLabelFile(null);
       setApplication(null);
       setJsonFileName(null);
-      setCleanupNote(
-        "Transient upload artifacts were cleared from memory after run completion. Re-upload files for another run.",
-      );
     }
   };
 
@@ -274,7 +203,6 @@ export const VerificationWorkbench = () => {
     setIsFixtureLoading(true);
     setFixtureError(null);
     setRunError(null);
-    setCleanupNote(null);
     setJsonError(null);
 
     try {
@@ -318,10 +246,6 @@ export const VerificationWorkbench = () => {
     }
   };
 
-  const handleLoadFixture = async () => {
-    await loadFixtureById(selectedFixtureId, false);
-  };
-
   const handleFixtureSelection = async (fixtureId: string) => {
     setSelectedFixtureId(fixtureId);
     if (!fixtureId) {
@@ -339,40 +263,30 @@ export const VerificationWorkbench = () => {
   };
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-4">
       <UploadsPanel
         fixtureOptions={fixtureOptions}
         selectedFixtureId={selectedFixtureId}
         isFixtureLoading={isFixtureLoading}
         fixtureError={fixtureError}
         handleFixtureSelection={handleFixtureSelection}
-        handleLoadFixture={handleLoadFixture}
         labelFileName={labelFile?.name ?? null}
         jsonFileName={jsonFileName}
         jsonError={jsonError}
         runError={runError}
-        cleanupNote={cleanupNote}
         isRunning={isRunning}
         canRunVerification={canRunVerification}
-        ocrProgressPercent={ocrProgressPercent}
         handleLabelUpload={handleLabelUpload}
         handleJsonUpload={handleJsonUpload}
         handleRunVerification={handleRunVerification}
-        handleClearSession={handleClearSession}
-      />
-
-      <OperatorDiagnostics
-        verificationResult={verificationResult}
-        runDurationsMs={runDurationsMs}
-        lastError={lastError}
       />
 
       {application && (
-        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <h2 className="text-sm font-semibold text-slate-900">
             Parsed Application
           </h2>
-          <div className="mt-3 grid gap-2 text-sm text-slate-700 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-2 grid gap-2 text-sm text-slate-700 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-md bg-slate-100 px-3 py-2">
               <span className="text-xs uppercase text-slate-500">
                 Application ID
@@ -399,24 +313,10 @@ export const VerificationWorkbench = () => {
         </section>
       )}
 
-      {verificationResult && (
-        <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-900">
-            Verification Run
-          </h2>
-          <p className="mt-1 text-xs text-slate-600">
-            Started: {new Date(verificationResult.startedAt).toLocaleString()} |{" "}
-            Ended: {new Date(verificationResult.endedAt).toLocaleString()} |{" "}
-            Duration: {formatDuration(verificationResult.durationMs)} | OCR lines:{" "}
-            {verificationResult.ocrLines.length}
-          </p>
-        </section>
-      )}
-
-      <div className="grid gap-6 xl:grid-cols-[1.3fr_1fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
         <div>
           {!verificationResult ? (
-            <div className="grid min-h-[420px] place-items-center rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-sm text-slate-600 shadow-sm">
+            <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-600 shadow-sm">
               Run verification to generate field-level results.
             </div>
           ) : (
@@ -432,8 +332,7 @@ export const VerificationWorkbench = () => {
           imageUrl={previewImageUrl}
           results={verificationResult?.fields ?? []}
           selectedField={selectedField}
-          ocrLines={verificationResult?.ocrLines ?? []}
-          ocrTokens={verificationResult?.ocrTokens ?? []}
+          ocrCoordinateSpace={verificationResult?.ocrCoordinateSpace ?? null}
         />
       </div>
     </div>

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { normalizePaddleOcrResponse } from "@/lib/paddle-normalize";
+import { normalizeOcrResponse } from "@/lib/ocr-normalize";
 import { parseApplicationJson } from "@/lib/schemas";
 import { verifyLabelLines } from "@/lib/verification";
 
-describe("paddle adapter evidence quality", () => {
+describe("ocr adapter evidence quality", () => {
   it("prefers compact token evidence over broad line evidence", () => {
     const application = parseApplicationJson({
       cola_application_id: "PAD-REG-01",
@@ -18,7 +18,7 @@ describe("paddle adapter evidence quality", () => {
       government_health_warning_required: true,
     });
 
-    const normalized = normalizePaddleOcrResponse({
+    const normalized = normalizeOcrResponse({
       lines: [
         {
           text: "Distilled & Bottled By Luciana Spirits S.p.A., 8 Via dei Fiori, Amalfi, Italy",
@@ -60,7 +60,7 @@ describe("paddle adapter evidence quality", () => {
         },
       ],
       diagnostics: {
-        model: "paddleocr",
+        model: "datalab_marker",
         inference_ms: 99,
         warnings: [],
       },

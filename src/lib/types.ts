@@ -23,6 +23,13 @@ export type PolygonPoint = {
   y: number;
 };
 
+export type OcrCoordinateSpace = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type OcrLine = {
   text: string;
   confidence: number;
@@ -85,6 +92,7 @@ export type VerificationResult = {
   fields: VerificationFieldResult[];
   ocrLines: OcrLine[];
   ocrTokens: OcrToken[];
+  ocrCoordinateSpace: OcrCoordinateSpace | null;
   ocrDiagnostics: OcrRunDiagnostics;
   startedAt: string;
   endedAt: string;

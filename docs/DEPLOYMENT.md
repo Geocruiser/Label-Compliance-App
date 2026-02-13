@@ -1,23 +1,25 @@
 # Deployment Guide (Internal)
 
-This deployment now uses a Dockerized PaddleOCR backend service and a Next.js frontend.
+This deployment now uses Datalab Hosted Marker API for OCR with a Next.js frontend.
 
 ## 1) Runtime Requirements
 
 - Node.js 20+
 - npm 10+
-- Docker Engine with Compose plugin
 
 ## 2) Components
 
-- Next.js app (UI + verification + OCR proxy route)
-- PaddleOCR service container (`services/paddle-ocr`)
+- Next.js app (UI + verification + Datalab OCR proxy route)
 
 ## 3) Environment Variables
 
-- `OCR_SERVICE_URL` (optional)
-  - Default: `http://localhost:8001/ocr`
-  - Set this if OCR service runs on a different host/port
+- `DATALAB_API_KEY` (required)
+  - Datalab API key used by `src/app/api/ocr/route.ts`
+- `DATALAB_BASE_URL` (optional)
+  - Default: `https://www.datalab.to`
+- `DATALAB_MARKER_MODE` (optional)
+  - Default: `balanced`
+  - Allowed values: `fast`, `balanced`, `accurate`
 
 ## 4) Local/Server Startup Sequence
 
@@ -27,20 +29,14 @@ This deployment now uses a Dockerized PaddleOCR backend service and a Next.js fr
 npm install
 ```
 
-2. Start OCR service:
-
-```bash
-npm run ocr:up
-```
-
-3. Run checks and build:
+2. Run checks and build:
 
 ```bash
 npm run check
 npm run build
 ```
 
-4. Start app:
+3. Start app:
 
 ```bash
 npm run start
@@ -52,22 +48,16 @@ Default app port is `3000`. Override if needed:
 PORT=8080 npm run start
 ```
 
-Stop OCR service:
-
-```bash
-npm run ocr:down
-```
-
 ## 5) Security and Network Notes
 
-- Place both services behind internal reverse proxy/TLS.
-- Restrict app and OCR service to internal network access.
-- Avoid exposing OCR container directly to public networks.
+- Place app traffic behind internal reverse proxy/TLS.
+- Restrict server-side access to Datalab credentials.
+- Do not expose `DATALAB_API_KEY` to browser code.
 - Enforce authentication/authorization at gateway/app layer.
 
 ## 6) Data Handling and Retention
 
-- Upload payloads are proxied to OCR service and processed transiently.
+- Upload payloads are proxied to Datalab Marker and processed transiently.
 - Session cleanup is applied after each verification run.
 - Operators can manually clear artifacts in the UI.
 - Avoid attaching external analytics to raw OCR payloads.
@@ -75,11 +65,11 @@ npm run ocr:down
 ## 7) Troubleshooting
 
 - OCR route returns 500:
-  - Confirm OCR container is up (`docker ps`).
-  - Check OCR health: `GET http://localhost:8001/health`.
-  - Verify `OCR_SERVICE_URL` matches reachable endpoint.
+  - Verify `DATALAB_API_KEY` is configured on the app host.
+  - Confirm outbound network access to `https://www.datalab.to`.
+  - Validate Datalab account status/rate limits.
 - OCR returns no lines:
-  - Inspect OCR service logs and diagnostics warnings in app UI.
+  - Inspect OCR route logs and diagnostics warnings in app UI.
   - Validate image format support and payload size.
 
 ## 8) Operational Validation Checklist
@@ -88,4 +78,4 @@ npm run ocr:down
 - `npm run build` succeeds.
 - `npm run benchmark:p95` reviewed.
 - Manual run on `test4.png` and `test8.png` succeeds.
-- Operator diagnostics show Paddle model timings and token/line counts.
+- Operator diagnostics show Datalab model timings and token/line counts.

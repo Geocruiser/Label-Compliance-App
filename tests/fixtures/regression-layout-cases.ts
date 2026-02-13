@@ -314,4 +314,313 @@ export const REGRESSION_LAYOUT_CASES: RegressionLayoutCase[] = [
       },
     },
   },
+  {
+    id: "brand-does-not-absorb-nearby-class-token",
+    applicationJson: {
+      cola_application_id: "REG-10",
+      brand_name: "AMALFI COAST",
+      class_type_designation: "GIN",
+      alcohol_content: "44% ABV (88 PROOF)",
+      net_contents: "750 ML",
+      bottler_producer_name_address:
+        "Distilled & Bottled By Luciana Spirits S.p.A., 8 Via dei Fiori, Amalfi, Italy",
+      is_imported: true,
+      country_of_origin_import: "ITALY",
+      government_health_warning_required: true,
+    },
+    ocrLines: [
+      createLine("AMALFI COAST", 0, 0.93),
+      createLine("GIN", 1, 0.94),
+      createLine("44% ALC./VOL. (88 PROOF)", 2, 0.89),
+      createLine("750 ML", 3, 0.9),
+      createLine(
+        "Distilled & Bottled By Luciana Spirits S.p.A., 8 Via dei Fiori, Amalfi, Italy",
+        4,
+        0.92,
+      ),
+      createLine("PRODUCT OF ITALY", 5, 0.9),
+      createLine(GOVERNMENT_WARNING_TEXT, 8, 0.9),
+    ],
+    ocrTokens: [
+      createToken("AMALFI", 180, 72, 330, 112, 0.93),
+      createToken("COAST", 344, 72, 502, 112, 0.92),
+      createToken("GIN", 302, 118, 386, 154, 0.94),
+      createToken("DISTILLED", 120, 450, 260, 488, 0.93),
+      createToken("BOTTLED", 274, 452, 398, 488, 0.94),
+    ],
+    expectedStatuses: {},
+    expectedEvidence: {
+      brand_name: {
+        maxAreaRatio: 0.09,
+        maxHeight: 56,
+        maxWidth: 360,
+        forbiddenSubstring: "GIN",
+        allowedSources: ["word"],
+      },
+    },
+  },
+  {
+    id: "class-type-prefers-compact-token-over-brand-plus-class",
+    applicationJson: {
+      cola_application_id: "REG-11",
+      brand_name: "AMALFI COAST",
+      class_type_designation: "GIN",
+      alcohol_content: "44% ABV (88 PROOF)",
+      net_contents: "750 ML",
+      bottler_producer_name_address:
+        "Distilled & Bottled By Luciana Spirits S.p.A., 8 Via dei Fiori, Amalfi, Italy",
+      is_imported: true,
+      country_of_origin_import: "ITALY",
+      government_health_warning_required: true,
+    },
+    ocrLines: [
+      createLine("AMALFI COAST GIN", 0, 0.94),
+      createLine("44% ALC./VOL. (88 PROOF)", 2, 0.9),
+      createLine("750 ML", 3, 0.9),
+      createLine(
+        "Distilled & Bottled By Luciana Spirits S.p.A., 8 Via dei Fiori, Amalfi, Italy",
+        4,
+        0.92,
+      ),
+      createLine("PRODUCT OF ITALY", 5, 0.9),
+      createLine(GOVERNMENT_WARNING_TEXT, 8, 0.9),
+    ],
+    ocrTokens: [
+      createToken("AMALFI", 180, 72, 330, 112, 0.94),
+      createToken("COAST", 344, 72, 502, 112, 0.93),
+      createToken("GIN", 516, 72, 602, 112, 0.95),
+      createToken("DISTILLED", 120, 450, 260, 488, 0.93),
+      createToken("BOTTLED", 274, 452, 398, 488, 0.94),
+    ],
+    expectedStatuses: {
+      class_type_designation: "Pass",
+    },
+    expectedEvidence: {
+      class_type_designation: {
+        maxAreaRatio: 0.05,
+        maxWidth: 120,
+        forbiddenSubstring: "AMALFI",
+        allowedSources: ["word"],
+      },
+    },
+  },
+  {
+    id: "test7-country-and-class-evidence-stay-compact",
+    applicationJson: {
+      cola_application_id: "REG-12",
+      brand_name: "BARBADOS GOLDEN OAK",
+      class_type_designation: "RUM",
+      alcohol_content: "40% ALC/VOL",
+      net_contents: "750 ML",
+      bottler_producer_name_address: null,
+      is_imported: true,
+      country_of_origin_import: "BARBADOS",
+      government_health_warning_required: true,
+    },
+    ocrLines: [
+      {
+        text: "BARBADOS GOLDEN OAK",
+        confidence: 0.93,
+        bbox: { x0: 140, y0: 60, x1: 620, y1: 118 },
+      },
+      {
+        text: "RUM",
+        confidence: 0.92,
+        bbox: { x0: 300, y0: 140, x1: 380, y1: 188 },
+      },
+      {
+        text: "750 ML",
+        confidence: 0.9,
+        bbox: { x0: 280, y0: 228, x1: 390, y1: 272 },
+      },
+      {
+        text: "BARBADOS",
+        confidence: 0.91,
+        bbox: { x0: 260, y0: 520, x1: 470, y1: 566 },
+      },
+      {
+        text: GOVERNMENT_WARNING_TEXT,
+        confidence: 0.9,
+        bbox: { x0: 60, y0: 760, x1: 720, y1: 860 },
+      },
+    ],
+    ocrTokens: [
+      createToken("BARBADOS", 150, 62, 312, 116, 0.93),
+      createToken("GOLDEN", 324, 62, 470, 116, 0.92),
+      createToken("OAK", 484, 62, 596, 116, 0.92),
+      // Simulate token-level localization drift near brand crest.
+      createToken("RUM", 560, 70, 606, 108, 0.94),
+      createToken("BARBADOS", 266, 522, 466, 566, 0.92),
+    ],
+    expectedStatuses: {
+      class_type_designation: "Pass",
+      country_of_origin: "Pass",
+    },
+    expectedEvidence: {
+      class_type_designation: {
+        maxAreaRatio: 0.03,
+        maxWidth: 120,
+        maxHeight: 60,
+        allowedSources: ["line"],
+      },
+      country_of_origin: {
+        maxAreaRatio: 0.05,
+        maxWidth: 240,
+        forbiddenSubstring: "GOLDEN",
+        allowedSources: ["word", "line"],
+      },
+    },
+  },
+  {
+    id: "class-type-avoids-thin-vertical-word-token",
+    applicationJson: {
+      cola_application_id: "REG-13",
+      brand_name: "GOLDEN OAK",
+      class_type_designation: "RUM",
+      alcohol_content: "40% ALC/VOL",
+      net_contents: "750 ML",
+      bottler_producer_name_address: null,
+      is_imported: true,
+      country_of_origin_import: "BARBADOS",
+      government_health_warning_required: true,
+    },
+    ocrLines: [
+      {
+        text: "GOLDEN OAK",
+        confidence: 0.93,
+        bbox: { x0: 180, y0: 62, x1: 520, y1: 118 },
+      },
+      {
+        text: "RUM",
+        confidence: 0.91,
+        bbox: { x0: 308, y0: 140, x1: 388, y1: 188 },
+      },
+      {
+        text: "BARBADOS",
+        confidence: 0.9,
+        bbox: { x0: 262, y0: 520, x1: 470, y1: 566 },
+      },
+      {
+        text: GOVERNMENT_WARNING_TEXT,
+        confidence: 0.9,
+        bbox: { x0: 60, y0: 760, x1: 720, y1: 860 },
+      },
+    ],
+    ocrTokens: [
+      createToken("GOLDEN", 188, 64, 350, 116, 0.93),
+      createToken("OAK", 362, 64, 500, 116, 0.92),
+      // Simulate drift: token OCR places RUM on a thin vertical area.
+      createToken("RUM", 594, 40, 630, 198, 0.94),
+      createToken("BARBADOS", 266, 522, 466, 566, 0.91),
+    ],
+    expectedStatuses: {},
+    expectedEvidence: {
+      class_type_designation: {
+        maxAreaRatio: 0.08,
+        maxWidth: 320,
+        maxHeight: 70,
+        allowedSources: ["line"],
+      },
+    },
+  },
+  {
+    id: "class-type-keeps-word-when-line-candidate-is-multiword",
+    applicationJson: {
+      cola_application_id: "REG-14",
+      brand_name: "STEEL HAMMER",
+      class_type_designation: "VODKA",
+      alcohol_content: "80 PROOF",
+      net_contents: "375 ML",
+      bottler_producer_name_address: null,
+      is_imported: false,
+      country_of_origin_import: null,
+      government_health_warning_required: true,
+    },
+    ocrLines: [
+      {
+        text: "STEEL HAMMER VODKA",
+        confidence: 0.85,
+        bbox: { x0: 150, y0: 52, x1: 640, y1: 228 },
+      },
+      {
+        text: "80 PROOF",
+        confidence: 0.9,
+        bbox: { x0: 150, y0: 250, x1: 290, y1: 300 },
+      },
+      {
+        text: "375 ML",
+        confidence: 0.9,
+        bbox: { x0: 510, y0: 250, x1: 640, y1: 300 },
+      },
+      {
+        text: GOVERNMENT_WARNING_TEXT,
+        confidence: 0.9,
+        bbox: { x0: 70, y0: 760, x1: 720, y1: 860 },
+      },
+    ],
+    ocrTokens: [
+      createToken("STEEL", 162, 60, 318, 220, 0.85),
+      createToken("HAMMER", 326, 60, 500, 220, 0.85),
+      // Thin token localization for class value.
+      createToken("VODKA", 610, 56, 640, 220, 0.86),
+    ],
+    expectedStatuses: {
+      class_type_designation: "Pass",
+    },
+    expectedEvidence: {
+      class_type_designation: {
+        forbiddenSubstring: "STEEL",
+        allowedSources: ["word"],
+      },
+    },
+  },
+  {
+    id: "test2-brand-and-class-avoid-slit-evidence-boxes",
+    applicationJson: {
+      cola_application_id: "REG-15",
+      brand_name: "SUNRISE",
+      class_type_designation: "IPA",
+      alcohol_content: null,
+      net_contents: "12 FL OZ",
+      bottler_producer_name_address: null,
+      is_imported: false,
+      country_of_origin_import: null,
+      government_health_warning_required: true,
+    },
+    ocrLines: [
+      {
+        text: "SUNRISE IPA",
+        confidence: 0.9,
+        bbox: { x0: 120, y0: 70, x1: 540, y1: 250 },
+      },
+      {
+        text: "12 FL OZ",
+        confidence: 0.9,
+        bbox: { x0: 230, y0: 286, x1: 420, y1: 334 },
+      },
+      {
+        text: GOVERNMENT_WARNING_TEXT,
+        confidence: 0.9,
+        bbox: { x0: 60, y0: 760, x1: 720, y1: 860 },
+      },
+    ],
+    ocrTokens: [
+      // Simulate OCR token drift where token boxes collapse into narrow vertical strips.
+      createToken("SUNRISE", 332, 76, 360, 242, 0.91),
+      createToken("IPA", 365, 82, 392, 246, 0.9),
+    ],
+    expectedStatuses: {},
+    expectedEvidence: {
+      brand_name: {
+        maxHeight: 130,
+        maxWidth: 360,
+        allowedSources: ["word", "line"],
+      },
+      class_type_designation: {
+        maxHeight: 120,
+        maxWidth: 260,
+        allowedSources: ["word", "line"],
+      },
+    },
+  },
 ];

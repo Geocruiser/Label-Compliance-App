@@ -1,7 +1,0 @@
-services:
-  paddle-ocr:
-    build:
-      context: ./services/paddle-ocr
-    container_name: label-compliance-paddle-ocr
-    ports:
-      - "8001:8001"
