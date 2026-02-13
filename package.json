@@ -5,14 +5,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:pages": "node scripts/build-pages.mjs",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:acceptance": "vitest run tests/acceptance",
-    "ocr:up": "docker compose -f docker-compose.ocr.yml up --build paddle-ocr",
-    "ocr:down": "docker compose -f docker-compose.ocr.yml down",
     "benchmark:p95": "tsx scripts/benchmark-p95.ts 200",
     "check": "npm run lint && npm run typecheck && npm run test"
   },

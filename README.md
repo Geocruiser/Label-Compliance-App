@@ -30,7 +30,7 @@ Milestone 1 delivers a working local-first vertical slice:
 
 Milestone 2 improves extraction quality and rule precision:
 
-- PaddleOCR extraction quality tuning with stable line/token normalization
+- OCR extraction quality tuning with stable line/token normalization
 - Class-aware verification requirements:
   - distilled spirits alcohol content treated as required
   - wine alcohol content missing values routed to review
@@ -87,33 +87,55 @@ Milestone 4 introduces production-readiness controls and operator telemetry:
 - Internal deployment documentation:
   - `docs/DEPLOYMENT.md` with install/build/start/security guidance
 
-## PaddleOCR Full Replacement (Current OCR Backend)
+## Datalab Marker OCR Backend
 
-OCR now runs via a Dockerized PaddleOCR service:
+OCR now runs through Datalab Hosted Marker API:
 
 - Browser uploads image to Next.js API route (`/api/ocr`)
-- API route forwards image to PaddleOCR service (`services/paddle-ocr`)
-- Paddle response is normalized to `ocrLines` and `ocrTokens`
+- API route submits to Datalab Marker and polls result completion
+- Datalab response is normalized to `ocrLines` and `ocrTokens`
 - Existing verification and evidence logic consumes normalized output without UI workflow changes
+
+### Runtime Modes
+
+- `NEXT_PUBLIC_APP_MODE=demo` (default):
+  - Uses pre-generated fixture payloads from `assets/Response Data/`
+  - Does not require server API routes
+  - Intended for GitHub Pages PoC/demo hosting
+- `NEXT_PUBLIC_APP_MODE=api`:
+  - Uses real Next API routes (`/api/ocr`, `/api/test-fixtures`)
+  - Requires server env vars including `DATALAB_API_KEY`
+  - Intended for local/internal full-flow validation
 
 ### Local Startup (OCR + App)
 
 1. Install JS dependencies:
    - `npm install`
-2. Start PaddleOCR container:
-   - `npm run ocr:up`
-3. Start Next.js app:
+2. Set client runtime mode:
+   - `NEXT_PUBLIC_APP_MODE=api`
+3. Set server environment variables:
+   - `DATALAB_API_KEY=<your_key>`
+   - optional: `DATALAB_BASE_URL=https://www.datalab.to`
+   - optional: `DATALAB_MARKER_MODE=balanced`
+4. Start Next.js app:
    - `npm run dev`
-4. Open:
+5. Open:
    - `http://localhost:3000`
 
-Optional OCR service URL override:
+### GitHub Pages PoC (Frontend Only)
 
-- Set `OCR_SERVICE_URL` (default is `http://localhost:8001/ocr`)
+1. Ensure GitHub Pages is set to **GitHub Actions** in repository settings.
+2. Push to `main` or `Marker-Branch` (or manually trigger the workflow).
+3. Workflow `.github/workflows/deploy-pages.yml` runs `npm run build:pages`:
+   - switches to static export mode
+   - temporarily excludes `src/app/api/*` only during export build
+   - deploys `out/` to Pages
+4. The deployed site runs in `demo` mode using pre-generated fixture responses.
+5. Reviewers who need real API can clone the repo and run with `NEXT_PUBLIC_APP_MODE=api` plus their own `DATALAB_API_KEY`.
 
 ## OCR Evidence Box Precision Improvements
 
-Recent updates improve evidence-box tightness with the PaddleOCR backend:
+Recent updates improve evidence-box tightness with the OCR backend:
 
 - Word-level OCR tokens parsed from TSV are now preserved alongside line-level OCR.
 - Field verification prefers minimal token clusters (word evidence) and falls back to line evidence only when needed.
@@ -142,7 +164,7 @@ Recent updates improve evidence-box tightness with the PaddleOCR backend:
 
 ## Usage
 
-1. Ensure PaddleOCR service is running (`npm run ocr:up`).
+1. Ensure `DATALAB_API_KEY` is configured on the app server.
 2. Upload one label image (`.png`, `.jpg`, `.jpeg`, `.webp`).
 3. Upload one application JSON file.
 4. Click `Run Verification`.
@@ -156,7 +178,9 @@ Recent updates improve evidence-box tightness with the PaddleOCR backend:
 - `src/components/verification-workbench.tsx` - Milestone 1 orchestrator UI
 - `src/lib/schemas.ts` - JSON schema parsing + canonical model conversion
 - `src/lib/ocr.ts` - OCR client adapter that calls `/api/ocr`
-- `src/lib/paddle-normalize.ts` - Paddle response normalization
+- `src/lib/ocr-normalize.ts` - OCR provider response normalization
+- `src/lib/demo-fixtures.ts` - demo fixture loaders for static frontend mode
+- `src/lib/app-mode.ts` - runtime mode switch (`demo` vs `api`)
 - `src/app/api/ocr/route.ts` - Next.js OCR proxy route
 - `src/lib/value-parsers.ts` - ABV/proof and net-contents parsers
 - `src/lib/class-rules.ts` - class-aware requirement and unit policies
@@ -171,9 +195,7 @@ Recent updates improve evidence-box tightness with the PaddleOCR backend:
 - `tests/acceptance/verification-acceptance.test.ts` - deterministic acceptance suite
 - `tests/regression/layout-regression.test.ts` - edge-case regression fixtures
 - `scripts/benchmark-p95.ts` - deterministic p95 benchmark runner
-- `services/paddle-ocr/app.py` - PaddleOCR FastAPI service
-- `services/paddle-ocr/Dockerfile` - container image definition
-- `docker-compose.ocr.yml` - local OCR service orchestration
+- `scripts/build-pages.mjs` - static Pages build helper (temporarily disables API routes)
 - `ARCHITECTURE.md` - architecture, folder structure, and milestone plan
 - `tasks/CHECKLIST.md` - implementation checklist and milestone tracker
 
@@ -183,7 +205,5 @@ Recent updates improve evidence-box tightness with the PaddleOCR backend:
 - Type check: `npm run typecheck`
 - Tests: `npm run test`
 - Acceptance tests only: `npm run test:acceptance`
-- OCR service up: `npm run ocr:up`
-- OCR service down: `npm run ocr:down`
 - Benchmark p95: `npm run benchmark:p95`
 - Combined: `npm run check`

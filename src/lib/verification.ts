@@ -214,6 +214,169 @@ const appendRuleContext = (reason: string, ruleIds: string[]) => {
 
 const mergeBoxes = (boxes: BoundingBox[]) => mergeEvidenceBoxes(boxes);
 
+const getBoundingBoxWidth = (box: BoundingBox) => {
+  return Math.max(1, box.x1 - box.x0);
+};
+
+const getBoundingBoxHeight = (box: BoundingBox) => {
+  return Math.max(1, box.y1 - box.y0);
+};
+
+const getBoundingBoxAspectRatio = (box: BoundingBox) => {
+  return getBoundingBoxWidth(box) / getBoundingBoxHeight(box);
+};
+
+const getBoundingBoxOverlapRatio = (
+  left: BoundingBox,
+  right: BoundingBox,
+) => {
+  const overlapWidth = Math.max(
+    0,
+    Math.min(left.x1, right.x1) - Math.max(left.x0, right.x0),
+  );
+  const overlapHeight = Math.max(
+    0,
+    Math.min(left.y1, right.y1) - Math.max(left.y0, right.y0),
+  );
+  if (overlapWidth <= 0 || overlapHeight <= 0) {
+    return 0;
+  }
+
+  const overlapArea = overlapWidth * overlapHeight;
+  const leftArea = Math.max(1, (left.x1 - left.x0) * (left.y1 - left.y0));
+  const rightArea = Math.max(1, (right.x1 - right.x0) * (right.y1 - right.y0));
+  return overlapArea / Math.min(leftArea, rightArea);
+};
+
+const getBestAnchorLineForSingleTokenField = (
+  field: FieldKey,
+  normalizedExpectedToken: string,
+  ocrLines: OcrLine[],
+): OcrLine | null => {
+  let bestLine: OcrLine | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const line of ocrLines) {
+    const coverage = getApproximateTokenCoverage([normalizedExpectedToken], line.text);
+    if (coverage < 0.82) {
+      continue;
+    }
+
+    const lineTokenCount = tokenizeNormalizedText(line.text).length;
+    const unmatchedRatio = getUnmatchedCandidateTokenRatio(
+      [normalizedExpectedToken],
+      line.text,
+    );
+    const aspectRatio = getBoundingBoxAspectRatio(line.bbox);
+    const aspectBonus = Math.min(0.24, (aspectRatio / 6) * 0.24);
+    const extraTokenPenalty = Math.max(0, lineTokenCount - 3) * 0.05;
+    const score =
+      (coverage * 0.55) +
+      (line.confidence * 0.2) +
+      aspectBonus -
+      (unmatchedRatio * 0.18) -
+      extraTokenPenalty;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestLine = line;
+    }
+  }
+
+  return bestLine;
+};
+
+const getProjectedTokenBoxFromLine = (
+  line: OcrLine,
+  normalizedExpectedToken: string,
+  field: FieldKey,
+): BoundingBox | null => {
+  const tokenMatches = Array.from(line.text.matchAll(/\S+/g));
+  if (tokenMatches.length === 0 || normalizedExpectedToken.length === 0) {
+    return null;
+  }
+
+  let bestMatch: { start: number; end: number; similarity: number } | null = null;
+  for (const match of tokenMatches) {
+    const tokenText = normalizeText(match[0]);
+    const similarity = diceCoefficient(normalizedExpectedToken, tokenText);
+    if (!bestMatch || similarity > bestMatch.similarity) {
+      bestMatch = {
+        start: match.index ?? 0,
+        end: (match.index ?? 0) + match[0].length,
+        similarity,
+      };
+    }
+  }
+
+  if (!bestMatch || bestMatch.similarity < 0.58) {
+    return null;
+  }
+
+  const lineWidth = Math.max(1, line.bbox.x1 - line.bbox.x0);
+  const lineUnits = Math.max(1, line.text.length);
+  const projectedX0 = line.bbox.x0 + (lineWidth * (bestMatch.start / lineUnits));
+  const projectedX1 = line.bbox.x0 + (lineWidth * (bestMatch.end / lineUnits));
+  const clampedProjectedX0 = Math.max(line.bbox.x0, Math.min(line.bbox.x1, projectedX0));
+  const clampedProjectedX1 = Math.max(
+    clampedProjectedX0,
+    Math.min(line.bbox.x1, projectedX1),
+  );
+
+  if (field !== "class_type_designation") {
+    if (field === "brand_name") {
+      const lineHeight = Math.max(1, line.bbox.y1 - line.bbox.y0);
+      const lineCenterX = (line.bbox.x0 + line.bbox.x1) / 2;
+      const projectedCenterX = (clampedProjectedX0 + clampedProjectedX1) / 2;
+      const blendedCenterX = (projectedCenterX * 0.6) + (lineCenterX * 0.4);
+      const tokenWidth = Math.max(8, clampedProjectedX1 - clampedProjectedX0);
+      const adjustedWidth = Math.min(
+        lineWidth * 0.72,
+        Math.max(tokenWidth * 1.25, lineWidth * 0.26, lineHeight * 1.0),
+      );
+      const x0 = Math.max(line.bbox.x0, blendedCenterX - (adjustedWidth / 2));
+      const x1 = Math.min(line.bbox.x1, blendedCenterX + (adjustedWidth / 2));
+      const y0 = line.bbox.y0 + (lineHeight * 0.06);
+      const y1 = line.bbox.y0 + (lineHeight * 0.64);
+
+      return {
+        x0,
+        y0: Math.max(line.bbox.y0, y0),
+        x1: Math.max(x0 + 1, x1),
+        y1: Math.max(line.bbox.y0 + 1, Math.min(line.bbox.y1, y1)),
+      };
+    }
+
+    return {
+      x0: clampedProjectedX0,
+      y0: line.bbox.y0,
+      x1: clampedProjectedX1,
+      y1: line.bbox.y1,
+    };
+  }
+
+  const lineHeight = Math.max(1, line.bbox.y1 - line.bbox.y0);
+  const lineCenterX = (line.bbox.x0 + line.bbox.x1) / 2;
+  const projectedCenterX = (clampedProjectedX0 + clampedProjectedX1) / 2;
+  const blendedCenterX = (projectedCenterX * 0.35) + (lineCenterX * 0.65);
+  const tokenWidth = Math.max(8, clampedProjectedX1 - clampedProjectedX0);
+  const adjustedWidth = Math.min(
+    lineWidth * 0.72,
+    Math.max(tokenWidth * 1.35, lineWidth * 0.22, lineHeight * 1.1),
+  );
+  const x0 = Math.max(line.bbox.x0, blendedCenterX - (adjustedWidth / 2));
+  const x1 = Math.min(line.bbox.x1, blendedCenterX + (adjustedWidth / 2));
+  const y0 = line.bbox.y0 + (lineHeight * 0.56);
+  const y1 = line.bbox.y0 + (lineHeight * 0.98);
+
+  return {
+    x0,
+    y0: Math.max(line.bbox.y0, y0),
+    x1: Math.max(x0 + 1, x1),
+    y1: Math.max(line.bbox.y0 + 1, Math.min(line.bbox.y1, y1)),
+  };
+};
+
 const averageConfidence = (lines: OcrLine[]) => {
   if (lines.length === 0) {
     return null;
@@ -252,6 +415,72 @@ const tokenizeNormalizedText = (value: string) => {
   return normalizeText(value)
     .split(" ")
     .filter((token) => token.length > 1);
+};
+
+const ALCOHOL_CLASS_TOKENS = new Set([
+  "gin",
+  "vodka",
+  "rum",
+  "tequila",
+  "mezcal",
+  "brandy",
+  "whiskey",
+  "whisky",
+  "scotch",
+  "bourbon",
+  "rye",
+  "beer",
+  "lager",
+  "ale",
+  "stout",
+  "porter",
+  "cider",
+  "wine",
+  "liqueur",
+  "spirits",
+]);
+
+const getUnmatchedCandidateTokenRatio = (
+  expectedTokens: string[],
+  candidateText: string,
+) => {
+  const candidateTokens = tokenizeNormalizedText(candidateText);
+  if (candidateTokens.length === 0 || expectedTokens.length === 0) {
+    return 0;
+  }
+
+  let unmatchedCount = 0;
+  for (const candidateToken of candidateTokens) {
+    let bestSimilarity = 0;
+    for (const expectedToken of expectedTokens) {
+      const similarity = diceCoefficient(candidateToken, expectedToken);
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+      }
+    }
+    if (bestSimilarity < 0.72) {
+      unmatchedCount += 1;
+    }
+  }
+
+  return unmatchedCount / candidateTokens.length;
+};
+
+const getBrandClassLeakPenalty = (
+  expectedBrandValue: string,
+  candidateText: string,
+) => {
+  const expectedTokens = new Set(tokenizeNormalizedText(expectedBrandValue));
+  const candidateTokens = tokenizeNormalizedText(candidateText);
+
+  let leakCount = 0;
+  for (const token of candidateTokens) {
+    if (!expectedTokens.has(token) && ALCOHOL_CLASS_TOKENS.has(token)) {
+      leakCount += 1;
+    }
+  }
+
+  return Math.min(0.5, leakCount * 0.28);
 };
 
 const getApproximateTokenCoverage = (
@@ -437,7 +666,12 @@ const getBestWordMatch = (
 
   const evaluateTokenSequence = (sequence: OcrToken[]) => {
     const orderedCluster = sortTokensForReadingOrder(sequence);
-    const maxWindow = Math.min(orderedCluster.length, Math.max(8, expectedTokens.length + 4));
+    const maxWindow = Math.min(
+      orderedCluster.length,
+      field === "brand_name"
+        ? Math.max(4, expectedTokens.length + 2)
+        : Math.max(8, expectedTokens.length + 4),
+    );
 
     for (let startIndex = 0; startIndex < orderedCluster.length; startIndex += 1) {
       for (
@@ -463,6 +697,24 @@ const getBestWordMatch = (
 
         const similarity = diceCoefficient(expectedValue, candidateText);
         const includesExpected = normalizedIncludes(candidateText, expectedValue);
+        const isSingleTokenClassDesignation =
+          field === "class_type_designation" && expectedTokens.length === 1;
+        const isSingleTokenCountryOfOrigin =
+          field === "country_of_origin" && expectedTokens.length === 1;
+        const unmatchedTokenRatio = getUnmatchedCandidateTokenRatio(
+          expectedTokens,
+          candidateText,
+        );
+        const includesBoost =
+          includesExpected && field === "brand_name"
+            ? Math.max(0.76, 0.99 - (unmatchedTokenRatio * 0.55))
+            : includesExpected && isSingleTokenClassDesignation
+              ? Math.max(0.72, 0.99 - (unmatchedTokenRatio * 0.72))
+              : includesExpected && isSingleTokenCountryOfOrigin
+                ? Math.max(0.76, 0.99 - (unmatchedTokenRatio * 0.62))
+              : includesExpected
+                ? 0.99
+                : 0;
         const averageTokenConfidence = averageConfidence(
           filteredSlice.map((token) => ({
             text: token.text,
@@ -482,21 +734,53 @@ const getBestWordMatch = (
         );
         const areaRatio = computeEvidenceBoxAreaRatio(clampedBox, pageBounds);
         const oversizedPenalty = isEvidenceBoxOversized(field, areaRatio) ? 0.22 : 0;
-        const windowPenalty = Math.max(0, windowSize - expectedTokens.length) * 0.03;
+        const windowPenalty = Math.max(0, windowSize - expectedTokens.length)
+          * (
+            field === "brand_name"
+              ? 0.05
+              : field === "class_type_designation"
+                ? 0.06
+                : field === "country_of_origin"
+                  ? 0.05
+                : 0.03
+          );
         const baseScore =
-          Math.max(similarity, includesExpected ? 0.99 : 0, tokenCoverage) * 0.75;
+          Math.max(similarity, includesBoost, tokenCoverage) * 0.75;
         let score = baseScore + (averageTokenConfidence * 0.25);
 
         if (field === "brand_name") {
           const uppercaseBonus = isMostlyUppercase(candidateText) ? 0.06 : 0;
           const addressPenalty = isAddressLikeText(candidateText) ? 0.45 : 0;
-          score += uppercaseBonus - addressPenalty;
+          const classLeakPenalty = getBrandClassLeakPenalty(expectedValue, candidateText);
+          const unmatchedPenalty = unmatchedTokenRatio * 0.28;
+          score += uppercaseBonus - addressPenalty - classLeakPenalty - unmatchedPenalty;
         }
 
         if (field === "class_type_designation") {
           const candidateCenterY = (clampedBox.y0 + clampedBox.y1) / 2;
           const topBias = Math.max(0, 1 - (candidateCenterY / maxY));
-          score += topBias * 0.08;
+          const compactTokenBonus =
+            expectedTokens.length === 1 && filteredSlice.length === 1 ? 0.16 : 0;
+          const tokenBoxAspectRatio = getBoundingBoxWidth(clampedBox) / getBoundingBoxHeight(clampedBox);
+          const verticalShapePenalty =
+            expectedTokens.length === 1 && filteredSlice.length === 1 && tokenBoxAspectRatio < 0.9
+              ? 0.26
+              : 0;
+          const spilloverPenalty =
+            unmatchedTokenRatio * 0.35 +
+            (expectedTokens.length === 1 ? Math.max(0, filteredSlice.length - 1) * 0.08 : 0);
+          score += topBias * 0.08 + compactTokenBonus - spilloverPenalty - verticalShapePenalty;
+        }
+
+        if (field === "country_of_origin") {
+          const candidateCenterY = (clampedBox.y0 + clampedBox.y1) / 2;
+          const lowerBias = Math.max(0, (candidateCenterY / maxY) - 0.35);
+          const compactTokenBonus =
+            expectedTokens.length === 1 && filteredSlice.length === 1 ? 0.12 : 0;
+          const spilloverPenalty =
+            unmatchedTokenRatio * 0.34 +
+            (expectedTokens.length === 1 ? Math.max(0, filteredSlice.length - 1) * 0.08 : 0);
+          score += lowerBias * 0.08 + compactTokenBonus - spilloverPenalty;
         }
 
         score = score - windowPenalty - oversizedPenalty;
@@ -563,14 +847,36 @@ const getBestLineMatch = (
     const similarity = diceCoefficient(expectedValue, line.text);
     const includesMatch = normalizedIncludes(line.text, expectedValue);
     const normalizedLineText = normalizeText(line.text);
+    const unmatchedTokenRatio = getUnmatchedCandidateTokenRatio(
+      normalizedTokens,
+      line.text,
+    );
     const lineTokenCount = tokenizeNormalizedText(line.text).length;
     const expectedContainsLine =
       normalizedIncludes(expectedValue, line.text) &&
       (normalizedLineText.length >= 4 || lineTokenCount >= 2);
+    const classSingleTokenIncludesBoost =
+      field === "class_type_designation" &&
+      normalizedTokens.length === 1 &&
+      includesMatch
+        ? Math.max(0.72, 0.99 - (unmatchedTokenRatio * 0.72))
+        : 0;
+    const countrySingleTokenIncludesBoost =
+      field === "country_of_origin" &&
+      normalizedTokens.length === 1 &&
+      includesMatch
+        ? Math.max(0.76, 0.99 - (unmatchedTokenRatio * 0.62))
+        : 0;
 
     const lineScoreBase = Math.max(
       similarity,
-      includesMatch ? 0.99 : 0,
+      classSingleTokenIncludesBoost > 0
+        ? classSingleTokenIncludesBoost
+        : countrySingleTokenIncludesBoost > 0
+          ? countrySingleTokenIncludesBoost
+        : includesMatch
+          ? 0.99
+          : 0,
       expectedContainsLine ? 0.8 : 0,
     );
 
@@ -583,13 +889,17 @@ const getBestLineMatch = (
       const uppercaseBonus = isMostlyUppercase(line.text) ? 0.05 : 0;
       const longLinePenalty = line.text.trim().split(/\s+/).length > 6 ? 0.12 : 0;
       const addressPenalty = isAddressLikeText(line.text) ? 0.38 : 0;
+      const unmatchedPenalty = unmatchedTokenRatio * 0.2;
+      const classLeakPenalty = getBrandClassLeakPenalty(expectedValue, line.text);
       lineScore =
         (lineScore * 0.7) +
         (tokenCoverage * 0.3) +
         (Math.max(0, topBias) * 0.08) +
         uppercaseBonus -
         longLinePenalty -
-        addressPenalty;
+        addressPenalty -
+        unmatchedPenalty -
+        classLeakPenalty;
     }
 
     if (field === "name_address") {
@@ -610,7 +920,23 @@ const getBestLineMatch = (
     if (field === "class_type_designation") {
       const lineCenterY = (line.bbox.y0 + line.bbox.y1) / 2;
       const topBias = Math.max(0, 1 - (lineCenterY / maxY));
-      lineScore += topBias * 0.08;
+      const compactTokenBonus =
+        normalizedTokens.length === 1 && lineTokenCount === 1 ? 0.16 : 0;
+      const spilloverPenalty =
+        unmatchedTokenRatio * 0.36 +
+        (normalizedTokens.length === 1 ? Math.max(0, lineTokenCount - 1) * 0.08 : 0);
+      lineScore += topBias * 0.08 + compactTokenBonus - spilloverPenalty;
+    }
+
+    if (field === "country_of_origin") {
+      const lineCenterY = (line.bbox.y0 + line.bbox.y1) / 2;
+      const lowerBias = Math.max(0, (lineCenterY / maxY) - 0.35);
+      const compactTokenBonus =
+        normalizedTokens.length === 1 && lineTokenCount === 1 ? 0.12 : 0;
+      const spilloverPenalty =
+        unmatchedTokenRatio * 0.34 +
+        (normalizedTokens.length === 1 ? Math.max(0, lineTokenCount - 1) * 0.08 : 0);
+      lineScore += lowerBias * 0.08 + compactTokenBonus - spilloverPenalty;
     }
 
     if (!bestCandidate || lineScore > bestCandidate.score) {
@@ -940,7 +1266,8 @@ const verifyTextField = (
     pageBounds,
   );
   const lineCandidate = getBestLineMatch(expectation.field, expectedValue, ocrLines);
-  const expectedTokenCount = tokenizeNormalizedText(expectedValue).length;
+  const expectedTokens = tokenizeNormalizedText(expectedValue);
+  const expectedTokenCount = expectedTokens.length;
   const lineAreaRatio = lineCandidate
     ? computeEvidenceBoxAreaRatio(lineCandidate.line.bbox, pageBounds)
     : null;
@@ -962,6 +1289,71 @@ const verifyTextField = (
       } else if (lineOversized || isAddressLikeText(lineCandidate.line.text)) {
         matchCandidate = wordCandidate;
       } else if (wordCandidate.score >= lineCandidate.score - 0.02) {
+        matchCandidate = wordCandidate;
+      }
+    } else if (
+      expectation.field === "class_type_designation" ||
+      expectation.field === "country_of_origin"
+    ) {
+      const wordTokenCount = tokenizeNormalizedText(wordCandidate.line.text).length;
+      const lineTokenCount = tokenizeNormalizedText(lineCandidate.line.text).length;
+      const wordBoxAspectRatio =
+        getBoundingBoxWidth(wordCandidate.line.bbox) /
+        getBoundingBoxHeight(wordCandidate.line.bbox);
+      const wordCoverage = getApproximateTokenCoverage(
+        expectedTokens,
+        wordCandidate.line.text,
+      );
+      const singleTokenSpatialMismatch =
+        expectedTokenCount === 1 &&
+        wordTokenCount === 1 &&
+        lineTokenCount === 1 &&
+        getBoundingBoxOverlapRatio(wordCandidate.line.bbox, lineCandidate.line.bbox) < 0.22;
+      const preferCompactWordMatch =
+        expectedTokenCount === 1 &&
+        wordTokenCount === 1 &&
+        lineTokenCount > 1 &&
+        wordCoverage >= 0.95;
+      const suspiciousCompactWordMatch =
+        expectedTokenCount === 1 &&
+        wordTokenCount === 1 &&
+        wordBoxAspectRatio < 0.9 &&
+        lineTokenCount === 1;
+      const projectedCompactWordBox =
+        expectation.field === "class_type_designation" &&
+        expectedTokenCount === 1 &&
+        wordTokenCount === 1 &&
+        wordBoxAspectRatio < 0.9 &&
+        lineTokenCount > 1
+          ? getProjectedTokenBoxFromLine(
+              lineCandidate.line,
+              expectedTokens[0],
+              expectation.field,
+            )
+          : null;
+
+      if (projectedCompactWordBox) {
+        matchCandidate = {
+          ...wordCandidate,
+          score: Math.max(wordCandidate.score, lineCandidate.score - 0.02),
+          line: {
+            ...wordCandidate.line,
+            bbox: projectedCompactWordBox,
+          },
+        };
+      } else if (singleTokenSpatialMismatch || suspiciousCompactWordMatch) {
+        matchCandidate = lineCandidate;
+      } else if (preferCompactWordMatch) {
+        matchCandidate = wordCandidate;
+      } else if (
+        wordCandidate.score >= lineCandidate.score - 0.04 &&
+        wordTokenCount < lineTokenCount
+      ) {
+        matchCandidate = wordCandidate;
+      } else if (
+        (lineOversized && wordCandidate.score >= lineCandidate.score - 0.03) ||
+        wordCandidate.score >= lineCandidate.score + 0.08
+      ) {
         matchCandidate = wordCandidate;
       }
     } else if (
@@ -990,6 +1382,44 @@ const verifyTextField = (
     };
   }
 
+  const shouldRepairSingleTokenFieldEvidence =
+    expectedTokenCount === 1 &&
+    (expectation.field === "brand_name" ||
+      expectation.field === "class_type_designation") &&
+    tokenizeNormalizedText(matchCandidate.line.text).length === 1;
+  if (shouldRepairSingleTokenFieldEvidence) {
+    const currentAspectRatio = getBoundingBoxAspectRatio(matchCandidate.line.bbox);
+    if (currentAspectRatio < 1.05) {
+      const anchorLine =
+        getBestAnchorLineForSingleTokenField(
+          expectation.field,
+          expectedTokens[0],
+          ocrLines,
+        ) ??
+        lineCandidate?.line ??
+        null;
+      if (anchorLine) {
+        const projectedBox = getProjectedTokenBoxFromLine(
+          anchorLine,
+          expectedTokens[0],
+          expectation.field,
+        );
+        if (
+          projectedBox &&
+          getBoundingBoxAspectRatio(projectedBox) > currentAspectRatio + 0.2
+        ) {
+          matchCandidate = {
+            ...matchCandidate,
+            line: {
+              ...matchCandidate.line,
+              bbox: projectedBox,
+            },
+          };
+        }
+      }
+    }
+  }
+
   const resolvedConfidence = calibratedConfidence(
     matchCandidate.line.confidence,
     matchCandidate.score,
@@ -1000,17 +1430,32 @@ const verifyTextField = (
   );
   const areaRatio = computeEvidenceBoxAreaRatio(matchCandidate.line.bbox, pageBounds);
   const oversized = isEvidenceBoxOversized(expectation.field, areaRatio);
+  const extractedTokenSpilloverRatio = getUnmatchedCandidateTokenRatio(
+    expectedTokens,
+    matchCandidate.line.text,
+  );
+  const singleTokenSpilloverDetected =
+    (expectation.field === "class_type_designation" ||
+      expectation.field === "country_of_origin") &&
+    expectedTokenCount === 1 &&
+    extractedTokenSpilloverRatio > 0.34;
   const evidenceReasonPrefix = oversized
     ? "Evidence area is larger than expected and may include adjacent text. "
     : "";
   const passCoverageThreshold = expectedTokenCount > 2 ? 0.55 : 0.35;
-  const passScoreThreshold = expectation.field === "brand_name" ? 0.93 : 0.9;
+  const passScoreThreshold =
+    expectation.field === "brand_name"
+      ? 0.93
+      : expectation.field === "class_type_designation" && expectedTokenCount === 1
+        ? 0.82
+        : 0.9;
   const passConfidenceThreshold = expectation.field === "brand_name" ? 0.92 : 0.55;
 
   if (
     matchCandidate.score >= passScoreThreshold &&
     matchCandidate.line.confidence >= passConfidenceThreshold &&
-    matchedTokenCoverage >= passCoverageThreshold
+    matchedTokenCoverage >= passCoverageThreshold &&
+    !singleTokenSpilloverDetected
   ) {
     return {
       field: expectation.field,
@@ -1030,6 +1475,9 @@ const verifyTextField = (
   }
 
   if (matchCandidate.score >= 0.75) {
+    const closeMatchReason = singleTokenSpilloverDetected
+      ? `${evidenceReasonPrefix}Detected field text includes extra adjacent label words and needs manual confirmation.`
+      : `${evidenceReasonPrefix}Detected text is close to expected but below strict pass threshold.`;
     return {
       field: expectation.field,
       label: FIELD_LABELS[expectation.field],
@@ -1037,8 +1485,7 @@ const verifyTextField = (
       extractedValue: matchCandidate.line.text,
       status: "Needs Review",
       confidence: resolvedConfidence,
-      reason:
-        `${evidenceReasonPrefix}Detected text is close to expected but below strict pass threshold.`,
+      reason: closeMatchReason,
       evidenceBox: matchCandidate.line.bbox,
       evidenceSource: matchCandidate.source,
       evidenceTokenCount: matchCandidate.tokenCount,

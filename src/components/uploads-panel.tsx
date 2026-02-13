@@ -12,19 +12,24 @@ type UploadsPanelProps = {
   isFixtureLoading: boolean;
   fixtureError: string | null;
   handleFixtureSelection: (fixtureId: string) => void | Promise<void>;
-  handleLoadFixture: () => void;
-  labelFileName: string | null;
-  jsonFileName: string | null;
+  labelSelectionSummary: string;
+  jsonSelectionSummary: string;
   jsonError: string | null;
   runError: string | null;
-  cleanupNote: string | null;
   isRunning: boolean;
   canRunVerification: boolean;
-  ocrProgressPercent: number | null;
+  batchCount: number;
+  maxBatchSize: number;
+  activeBatchIndex: number | null;
+  activeLabelId: string | null;
+  processedCount: number;
+  completedCount: number;
+  failedCount: number;
+  decidedCount: number;
+  undecidedCount: number;
   handleLabelUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   handleJsonUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   handleRunVerification: () => void;
-  handleClearSession: () => void;
 };
 
 export const UploadsPanel = ({
@@ -33,38 +38,41 @@ export const UploadsPanel = ({
   isFixtureLoading,
   fixtureError,
   handleFixtureSelection,
-  handleLoadFixture,
-  labelFileName,
-  jsonFileName,
+  labelSelectionSummary,
+  jsonSelectionSummary,
   jsonError,
   runError,
-  cleanupNote,
   isRunning,
   canRunVerification,
-  ocrProgressPercent,
+  batchCount,
+  maxBatchSize,
+  activeBatchIndex,
+  activeLabelId,
+  processedCount,
+  completedCount,
+  failedCount,
+  decidedCount,
+  undecidedCount,
   handleLabelUpload,
   handleJsonUpload,
   handleRunVerification,
-  handleClearSession,
 }: UploadsPanelProps) => {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-900">Uploads</h2>
-      <p className="mt-1 text-xs text-slate-600">
-        Milestone 1 supports both PRD schema and provided legacy test-form JSON.
-      </p>
 
-      <div className="mt-4 rounded-lg border border-slate-300 p-3">
+      <div className="mt-2 rounded-lg border border-slate-300 p-2.5">
         <div className="flex flex-wrap items-center gap-2">
           <label
             htmlFor="fixture-select"
             className="text-xs font-medium uppercase tracking-wide text-slate-500"
           >
-            Quick load fixture (auto-run)
+            Demo Presets
           </label>
           <select
             id="fixture-select"
             aria-label="Select test fixture combination"
+            disabled={isFixtureLoading}
             className="min-w-[220px] rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             value={selectedFixtureId}
             onChange={(event) => {
@@ -78,15 +86,6 @@ export const UploadsPanel = ({
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            aria-label="Load selected fixture files"
-            disabled={!selectedFixtureId || isFixtureLoading}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
-            onClick={handleLoadFixture}
-          >
-            {isFixtureLoading ? "Loading..." : "Load Only"}
-          </button>
         </div>
         {fixtureError && (
           <p className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
@@ -95,55 +94,65 @@ export const UploadsPanel = ({
         )}
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <label className="flex flex-col gap-2 rounded-lg border border-slate-300 p-3 text-sm text-slate-800">
-          <span className="font-medium">Label image (.png/.jpg/.jpeg)</span>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <label className="flex flex-col gap-2 rounded-lg border border-slate-300 p-2.5 text-sm text-slate-800">
+          <span className="font-medium">Label images (.png/.jpg/.jpeg/.webp)</span>
           <input
             type="file"
             accept="image/png,image/jpeg,image/jpg,image/webp"
             aria-label="Upload label image file"
+            multiple
             className="block w-full rounded-md border border-slate-300 px-3 py-2 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-indigo-700"
             onChange={handleLabelUpload}
           />
-          <span className="text-xs text-slate-500">
-            {labelFileName ? `Selected: ${labelFileName}` : "No file selected"}
-          </span>
+          <span className="text-xs text-slate-500">{labelSelectionSummary}</span>
         </label>
 
-        <label className="flex flex-col gap-2 rounded-lg border border-slate-300 p-3 text-sm text-slate-800">
-          <span className="font-medium">Application JSON</span>
+        <label className="flex flex-col gap-2 rounded-lg border border-slate-300 p-2.5 text-sm text-slate-800">
+          <span className="font-medium">Application JSON files</span>
           <input
             type="file"
             accept="application/json,.json"
             aria-label="Upload application JSON file"
+            multiple
             className="block w-full rounded-md border border-slate-300 px-3 py-2 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-indigo-700"
             onChange={handleJsonUpload}
           />
-          <span className="text-xs text-slate-500">
-            {jsonFileName ? `Selected: ${jsonFileName}` : "No file selected"}
-          </span>
+          <span className="text-xs text-slate-500">{jsonSelectionSummary}</span>
         </label>
       </div>
 
+      <p className="mt-2 text-xs text-slate-600">
+        Batch size limit: {maxBatchSize}. Paired labels: {batchCount}.
+        {activeBatchIndex !== null && activeLabelId
+          ? ` Reviewing ${activeLabelId} (${activeBatchIndex + 1}/${batchCount}).`
+          : ""}
+      </p>
+      {batchCount > 0 && (
+        <div className="mt-2 grid gap-2 text-[11px] text-slate-600 sm:grid-cols-2">
+          <p className="rounded-md bg-slate-100 px-2.5 py-1.5">
+            Processed {processedCount}/{batchCount} (completed {completedCount}, failed{" "}
+            {failedCount})
+          </p>
+          <p className="rounded-md bg-slate-100 px-2.5 py-1.5">
+            Decisions {decidedCount}/{batchCount} (undecided {undecidedCount})
+          </p>
+        </div>
+      )}
+
       {jsonError && (
-        <p className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+        <p className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
           {jsonError}
         </p>
       )}
 
       {runError && (
-        <p className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+        <p className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
           {runError}
         </p>
       )}
 
-      {cleanupNote && (
-        <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-          {cleanupNote}
-        </p>
-      )}
-
-      <div className="mt-4 flex flex-wrap items-center gap-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           aria-label="Run label verification"
@@ -152,22 +161,6 @@ export const UploadsPanel = ({
           className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
         >
           {isRunning ? "Running Verification..." : "Run Verification"}
-        </button>
-
-        {isRunning && (
-          <span className="text-xs text-slate-600">
-            OCR progress:{" "}
-            {ocrProgressPercent === null ? "starting..." : `${ocrProgressPercent}%`}
-          </span>
-        )}
-
-        <button
-          type="button"
-          aria-label="Clear transient session artifacts"
-          onClick={handleClearSession}
-          className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Clear Session Artifacts
         </button>
       </div>
     </section>

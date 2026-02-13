@@ -161,7 +161,7 @@ Each field must return exactly one of:
 ---
 
 ### 10) Recommended implementation notes
-- Local OCR pipeline (e.g., PaddleOCR), with optional explicit preprocessing only if benchmarked improvements justify added complexity
+- OCR provider pipeline (e.g., Datalab Marker), with optional explicit preprocessing only if benchmarked improvements justify added complexity
 - Conservative fuzzy matching thresholds to prefer Needs Review
 - Front-end canvas overlay for bounding boxes + hover interactions
 - Log only non-sensitive timing + error metrics

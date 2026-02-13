@@ -23,11 +23,12 @@ const buildVerificationResult = (): VerificationResult => {
     ],
     ocrLines: [],
     ocrTokens: [],
+    ocrCoordinateSpace: null,
     ocrDiagnostics: {
       totalOcrMs: 420,
       lineCount: 12,
       tokenCount: 44,
-      model: "paddleocr",
+      model: "datalab_marker",
       inferenceMs: 215,
       apiRoundTripMs: 305,
       cleanupApplied: true,
@@ -41,7 +42,7 @@ const buildVerificationResult = (): VerificationResult => {
 };
 
 describe("operator diagnostics", () => {
-  it("renders paddle-only OCR diagnostics without legacy pipeline fields", () => {
+  it("renders OCR diagnostics without legacy pipeline fields", () => {
     const html = renderToStaticMarkup(
       createElement(OperatorDiagnostics, {
         verificationResult: buildVerificationResult(),

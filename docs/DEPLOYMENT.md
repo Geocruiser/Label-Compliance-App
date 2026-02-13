@@ -1,25 +1,33 @@
 # Deployment Guide (Internal)
 
-This deployment now uses a Dockerized PaddleOCR backend service and a Next.js frontend.
+This deployment supports two modes:
+
+- Full app mode (`NEXT_PUBLIC_APP_MODE=api`) with Datalab OCR via server API route
+- Frontend demo mode (`NEXT_PUBLIC_APP_MODE=demo`) with pre-generated fixture responses
 
 ## 1) Runtime Requirements
 
 - Node.js 20+
 - npm 10+
-- Docker Engine with Compose plugin
 
 ## 2) Components
 
-- Next.js app (UI + verification + OCR proxy route)
-- PaddleOCR service container (`services/paddle-ocr`)
+- Next.js app (UI + verification + Datalab OCR proxy route)
 
 ## 3) Environment Variables
 
-- `OCR_SERVICE_URL` (optional)
-  - Default: `http://localhost:8001/ocr`
-  - Set this if OCR service runs on a different host/port
+- `NEXT_PUBLIC_APP_MODE` (optional)
+  - `demo` (default): use pre-generated fixture data, no server OCR route calls
+  - `api`: call real Next API routes (`/api/ocr`, `/api/test-fixtures`)
+- `DATALAB_API_KEY` (required)
+  - Datalab API key used by `src/app/api/ocr/route.ts`
+- `DATALAB_BASE_URL` (optional)
+  - Default: `https://www.datalab.to`
+- `DATALAB_MARKER_MODE` (optional)
+  - Default: `balanced`
+  - Allowed values: `fast`, `balanced`, `accurate`
 
-## 4) Local/Server Startup Sequence
+## 4) Local/Server Startup Sequence (Real API Mode)
 
 1. Install dependencies:
 
@@ -27,10 +35,11 @@ This deployment now uses a Dockerized PaddleOCR backend service and a Next.js fr
 npm install
 ```
 
-2. Start OCR service:
+2. Configure environment:
 
 ```bash
-npm run ocr:up
+NEXT_PUBLIC_APP_MODE=api
+DATALAB_API_KEY=<your_key>
 ```
 
 3. Run checks and build:
@@ -52,40 +61,48 @@ Default app port is `3000`. Override if needed:
 PORT=8080 npm run start
 ```
 
-Stop OCR service:
+## 5) GitHub Pages PoC (Frontend Demo Only)
 
-```bash
-npm run ocr:down
-```
+This repo includes `.github/workflows/deploy-pages.yml` for static Pages deploy.
 
-## 5) Security and Network Notes
+- Build command: `npm run build:pages`
+- Build helper: `scripts/build-pages.mjs`
+- Behavior:
+  - Sets `GITHUB_PAGES=true` for static export/basePath config
+  - Sets `NEXT_PUBLIC_APP_MODE=demo`
+  - Temporarily moves `src/app/api` out of the app tree during export build
+  - Deploys `out/` artifact to GitHub Pages
 
-- Place both services behind internal reverse proxy/TLS.
-- Restrict app and OCR service to internal network access.
-- Avoid exposing OCR container directly to public networks.
+Reviewers can still clone locally and run real API mode by setting `NEXT_PUBLIC_APP_MODE=api` and their own Datalab key.
+
+## 6) Security and Network Notes
+
+- Place app traffic behind internal reverse proxy/TLS.
+- Restrict server-side access to Datalab credentials.
+- Do not expose `DATALAB_API_KEY` to browser code.
 - Enforce authentication/authorization at gateway/app layer.
 
-## 6) Data Handling and Retention
+## 7) Data Handling and Retention
 
-- Upload payloads are proxied to OCR service and processed transiently.
+- Upload payloads are proxied to Datalab Marker and processed transiently.
 - Session cleanup is applied after each verification run.
 - Operators can manually clear artifacts in the UI.
 - Avoid attaching external analytics to raw OCR payloads.
 
-## 7) Troubleshooting
+## 8) Troubleshooting
 
 - OCR route returns 500:
-  - Confirm OCR container is up (`docker ps`).
-  - Check OCR health: `GET http://localhost:8001/health`.
-  - Verify `OCR_SERVICE_URL` matches reachable endpoint.
+  - Verify `DATALAB_API_KEY` is configured on the app host.
+  - Confirm outbound network access to `https://www.datalab.to`.
+  - Validate Datalab account status/rate limits.
 - OCR returns no lines:
-  - Inspect OCR service logs and diagnostics warnings in app UI.
+  - Inspect OCR route logs and diagnostics warnings in app UI.
   - Validate image format support and payload size.
 
-## 8) Operational Validation Checklist
+## 9) Operational Validation Checklist
 
 - `npm run check` passes.
 - `npm run build` succeeds.
 - `npm run benchmark:p95` reviewed.
 - Manual run on `test4.png` and `test8.png` succeeds.
-- Operator diagnostics show Paddle model timings and token/line counts.
+- Operator diagnostics show Datalab model timings and token/line counts.

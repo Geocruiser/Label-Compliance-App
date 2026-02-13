@@ -1,4 +1,3 @@
-import { percentFromConfidence } from "@/lib/normalization";
 import type { FieldKey, VerificationFieldResult } from "@/lib/types";
 import { StatusBadge } from "@/components/status-badge";
 
@@ -38,13 +37,11 @@ export const ResultsTable = ({
               <th className="px-4 py-3 font-semibold">Application</th>
               <th className="px-4 py-3 font-semibold">Label Extracted</th>
               <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 font-semibold">Confidence</th>
             </tr>
           </thead>
           <tbody>
             {results.map((result) => {
               const isActiveRow = selectedField === result.field;
-              const confidencePercent = percentFromConfidence(result.confidence);
 
               return (
                 <tr
@@ -77,9 +74,6 @@ export const ResultsTable = ({
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={result.status} />
-                  </td>
-                  <td className="px-4 py-3 text-slate-700">
-                    {confidencePercent === null ? "N/A" : `${confidencePercent}%`}
                   </td>
                 </tr>
               );

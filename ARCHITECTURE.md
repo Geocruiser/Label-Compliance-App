@@ -64,10 +64,9 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
   - receives normalized line/token OCR outputs
 - `app/api/ocr/route.ts`
   - server OCR proxy route
-  - forwards image payloads to PaddleOCR service
-- `services/paddle-ocr/app.py`
-  - FastAPI service wrapping PaddleOCR inference
-  - returns line and token boxes with confidence
+  - submits image to Datalab Marker API and polls for completion
+- `ocr-normalize.ts`
+  - maps provider responses into normalized line/token OCR outputs
 
 ## Folder Structure
 
@@ -78,8 +77,6 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
 ├── scripts/
 │   ├── benchmark-p95.ts
 │   └── README.md
-├── services/
-│   └── paddle-ocr/
 ├── tasks/
 │   └── CHECKLIST.md
 ├── docs/
@@ -113,7 +110,7 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
         ├── constants.ts
         ├── normalization.ts
         ├── ocr.ts
-        ├── paddle-normalize.ts
+        ├── ocr-normalize.ts
         ├── policy/
         ├── performance.ts
         ├── schemas.ts
@@ -136,7 +133,7 @@ This architecture is based on `docs/LABEL_VERIFICATION_APP.md` (the PRD availabl
 
 ### Milestone 2 - Extraction Quality + Rule Precision (Implemented)
 
-- PaddleOCR-based extraction quality improvements and output normalization
+- OCR extraction quality improvements and output normalization
 - Class-aware matching profiles (wine/beer/distilled)
 - Unit normalization and ABV/proof parser-driven comparisons
 - Stricter warning validation heuristics and confidence-based outcomes

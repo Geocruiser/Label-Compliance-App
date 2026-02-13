@@ -7,7 +7,7 @@ describe("ocr client adapter", () => {
     vi.restoreAllMocks();
   });
 
-  it("calls /api/ocr and returns normalized paddle output", async () => {
+  it("calls /api/ocr and returns normalized OCR output", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -33,7 +33,7 @@ describe("ocr client adapter", () => {
           },
         ],
         diagnostics: {
-          model: "paddleocr",
+          model: "datalab_marker",
           inference_ms: 142,
           warnings: [],
         },
@@ -51,7 +51,13 @@ describe("ocr client adapter", () => {
     );
     expect(result.lines).toHaveLength(1);
     expect(result.tokens).toHaveLength(2);
-    expect(result.diagnostics.model).toBe("paddleocr");
+    expect(result.coordinateSpace).toEqual({
+      x: 120,
+      y: 80,
+      width: 300,
+      height: 52,
+    });
+    expect(result.diagnostics.model).toBe("datalab_marker");
     expect(result.diagnostics.cleanupApplied).toBe(true);
   });
 
